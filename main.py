@@ -40,6 +40,7 @@ warnings.simplefilter("ignore")
 os.system("cls||clear")
 plt.close("all")
 
+# Use this flag to generate graph
 plot_spectrum_flag = True
 
 if __name__ == "__main__":
