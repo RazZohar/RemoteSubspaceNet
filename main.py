@@ -40,6 +40,8 @@ warnings.simplefilter("ignore")
 os.system("cls||clear")
 plt.close("all")
 
+plot_spectrum_flag = True
+
 if __name__ == "__main__":
     # Initialize paths
     external_data_path = Path.cwd() / "data"
@@ -60,14 +62,16 @@ if __name__ == "__main__":
     dt_string_for_save = now.strftime("%d_%m_%Y_%H_%M")
     # Operations commands
     commands = {
-        "SAVE_TO_FILE": True,  # Saving results to file or present them over CMD
+        "SAVE_TO_FILE": False,  # Saving results to file or present them over CMD
         "CREATE_DATA": False,  # Creating new dataset
         "LOAD_DATA": True,  # Loading data from exist dataset
         "LOAD_MODEL": True,  # Load specific model for training
-        "TRAIN_MODEL": True,  # Applying training operation
-        "SAVE_MODEL": False,  # Saving tuned model
+        "TRAIN_MODEL": False,  # Applying training operation
+        "SAVE_MODEL": True,  # Saving tuned model
         "EVALUATE_MODE": True,  # Evaluating desired algorithms
     }
+
+    print(f'Start Executing commands')
     # Saving simulation scores to external file
     if commands["SAVE_TO_FILE"]:
         file_path = (
@@ -87,14 +91,16 @@ if __name__ == "__main__":
         .set_parameter("bias", 0.05)
         .set_parameter("sv_noise_var", 0)
     )
+    print(f'Set model configuration')
     # Generate model configuration
     model_config = (
         ModelGenerator()
         .set_model_type("SubspaceNet")
-        .set_diff_method("esprit")
+        .set_diff_method("root_music")
         .set_tau(8)
         .set_model(system_model_params)
     )
+    print('Generating model configuration')
     # Define samples size
     samples_size = 100000  # Overall dateset size
     train_test_ratio = 0.05  # training and testing datasets ratio
@@ -255,7 +261,7 @@ if __name__ == "__main__":
             subspace_criterion=subspace_criterion,
             system_model=samples_model,
             figures=figures,
-            plot_spec=False,
+            plot_spec=plot_spectrum_flag,
         )
     plt.show()
     print("end")

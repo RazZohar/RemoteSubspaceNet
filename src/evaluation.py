@@ -204,15 +204,28 @@ def evaluate_augmented_model(
             if not algorithm.startswith("esprit"):
                 if plot_spec and i == len(dataset.dataset) - 1:
                     predictions, spectrum = method_output[0], method_output[1]
-                    figures[algorithm]["norm factor"] = np.max(spectrum)
-                    plot_spectrum(
-                        predictions=predictions,
-                        true_DOA=DOA * R2D,
-                        system_model=system_model,
-                        spectrum=spectrum,
-                        algorithm="SubNet+" + algorithm.upper(),
-                        figures=figures,
-                    )
+
+
+                    if algorithm.startswith("r-music"):
+                        DOA_all = method_output[2]
+                        roots = method_output[1]
+                        plot_spectrum(
+                            predictions=DOA_all * R2D,
+                            true_DOA=DOA[0] * R2D,
+                            roots=roots,
+                            algorithm="SubNet+R-MUSIC_aug",
+                            figures=figures,
+                        )
+                    else:
+                        figures[algorithm]["norm factor"] = np.max(spectrum)
+                        plot_spectrum(
+                            predictions=predictions,
+                            true_DOA=DOA * R2D,
+                            system_model=system_model,
+                            spectrum=spectrum,
+                            algorithm="SubNet+" + algorithm.upper(),
+                            figures=figures,
+                        )
     return np.mean(hybrid_loss)
 
 

@@ -38,6 +38,8 @@ from pathlib import Path
 from src.system_model import SystemModelParams
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+#device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+
 
 
 def create_dataset(

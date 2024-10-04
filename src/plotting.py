@@ -163,10 +163,11 @@ def plot_root_music_spectrum(roots: np.ndarray, predictions: np.ndarray,
     # plot roots ang angles 
     for i in range(len(predictions)):
       angle = predictions[i]
-      r = np.abs(roots[i])
-      ax.set_ylim([0, 1.2])
-      ax.set_yticks([0, 1])
-      ax.plot([0, angle * np.pi / 180], [0, r], marker='o')
+      if roots is not None:
+          r = np.abs(roots[i])
+          ax.set_ylim([0, 1.2])
+          ax.set_yticks([0, 1])
+          ax.plot([0, angle * np.pi / 180], [0, r], marker='o')
     for doa in true_DOA:
       ax.plot([doa * np.pi / 180], [1], marker='x', color="r", markersize=14)
     ax.set_xlabel("Angels [deg]")

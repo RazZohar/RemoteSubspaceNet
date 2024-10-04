@@ -358,6 +358,7 @@ class SubspaceNet(nn.Module):
         # Rx_tau shape: [Batch size, tau, 2N, N]
         self.N = Rx_tau.shape[-1]
         self.batch_size = Rx_tau.shape[0]
+
         ## Architecture flow ##
         # CNN block #1
         x = self.conv1(Rx_tau)
@@ -377,6 +378,7 @@ class SubspaceNet(nn.Module):
         # DCNN block #3
         x = self.DropOut(x)
         Rx = self.deconv4(x)
+
         # Reshape Output shape: [Batch size, 2N, N]
         Rx_View = Rx.view(Rx.size(0), Rx.size(2), Rx.size(3))
         # Real and Imaginary Reconstruction
@@ -436,6 +438,7 @@ class SubspaceNetEsprit(SubspaceNet):
         # Rx_tau shape: [Batch size, tau, 2N, N]
         self.N = Rx_tau.shape[-1]
         self.batch_size = Rx_tau.shape[0]
+
         ## Architecture flow ##
         # CNN block #1
         x = self.conv1(Rx_tau)
@@ -455,6 +458,7 @@ class SubspaceNetEsprit(SubspaceNet):
         # DCNN block #3
         x = self.DropOut(x)
         Rx = self.deconv4(x)
+
         # Reshape Output shape: [Batch size, 2N, N]
         Rx_View = Rx.view(Rx.size(0), Rx.size(2), Rx.size(3))
         # Real and Imaginary Reconstruction
