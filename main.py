@@ -43,6 +43,8 @@ plt.close("all")
 # Use this flag to generate graph
 plot_spectrum_flag = True
 
+
+
 if __name__ == "__main__":
     # Initialize paths
     external_data_path = Path.cwd() / "data"
@@ -63,11 +65,11 @@ if __name__ == "__main__":
     dt_string_for_save = now.strftime("%d_%m_%Y_%H_%M")
     # Operations commands
     commands = {
-        "SAVE_TO_FILE": False,  # Saving results to file or present them over CMD
+        "SAVE_TO_FILE": True,  # Saving results to file or present them over CMD
         "CREATE_DATA": False,  # Creating new dataset
         "LOAD_DATA": True,  # Loading data from exist dataset
-        "LOAD_MODEL": True,  # Load specific model for training
-        "TRAIN_MODEL": False,  # Applying training operation
+        "LOAD_MODEL": False,  # Load specific model for training
+        "TRAIN_MODEL": True,  # Applying training operation
         "SAVE_MODEL": True,  # Saving tuned model
         "EVALUATE_MODE": True,  # Evaluating desired algorithms
     }

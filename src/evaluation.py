@@ -210,7 +210,7 @@ def evaluate_augmented_model(
                         DOA_all = method_output[2]
                         roots = method_output[1]
                         plot_spectrum(
-                            predictions=DOA_all * R2D,
+                            predictions=DOA_all,
                             true_DOA=DOA[0] * R2D,
                             roots=roots,
                             algorithm="SubNet+R-MUSIC_aug",

@@ -255,6 +255,13 @@ class DeepRootMUSIC(nn.Module):
         return doa_prediction, doa_all_predictions, roots, Rz
 
 
+class AntiRectifierLayer(nn.Module):
+    def __init__(self, function):
+        super(AntiRectifierLayer, self).__init__()
+        self.function = function
+    def forward(self, x):
+        return self.function(x)
+
 # TODO: inherit SubspaceNet from DeepRootMUSIC
 class SubspaceNet(nn.Module):
     """SubspaceNet is model-based deep learning model for generalizing DOA estimation problem,
@@ -296,11 +303,32 @@ class SubspaceNet(nn.Module):
         self.conv1 = nn.Conv2d(self.tau, 16, kernel_size=2)
         self.conv2 = nn.Conv2d(32, 32, kernel_size=2)
         self.conv3 = nn.Conv2d(64, 64, kernel_size=2)
+
+        self.anti_rectifier_layer = AntiRectifierLayer(self.anti_rectifier)
+
+        self.encoder = nn.Sequential(self.conv1,
+                                     self.anti_rectifier_layer,
+                                     self.conv2,
+                                     self.anti_rectifier_layer,
+                                     self.conv3,
+                                     self.anti_rectifier_layer)
+
+
+
         self.deconv2 = nn.ConvTranspose2d(128, 32, kernel_size=2)
         self.deconv3 = nn.ConvTranspose2d(64, 16, kernel_size=2)
         self.deconv4 = nn.ConvTranspose2d(32, 1, kernel_size=2)
         self.DropOut = nn.Dropout(0.2)
         self.ReLU = nn.ReLU()
+
+        # Define The decoder of the AE architecture
+        self.decoder = nn.Sequential(self.deconv2,
+                                     self.anti_rectifier_layer,
+                                     self.deconv3,
+                                     self.anti_rectifier_layer,
+                                     self.DropOut,
+                                     self.deconv4)
+
         # Set the subspace method for training
         self.set_diff_method(diff_method)
 
@@ -360,24 +388,11 @@ class SubspaceNet(nn.Module):
         self.batch_size = Rx_tau.shape[0]
 
         ## Architecture flow ##
-        # CNN block #1
-        x = self.conv1(Rx_tau)
-        x = self.anti_rectifier(x)
-        # CNN block #2
-        x = self.conv2(x)
-        x = self.anti_rectifier(x)
-        # CNN block #3
-        x = self.conv3(x)
-        x = self.anti_rectifier(x)
-        # DCNN block #1
-        x = self.deconv2(x)
-        x = self.anti_rectifier(x)
-        # DCNN block #2
-        x = self.deconv3(x)
-        x = self.anti_rectifier(x)
-        # DCNN block #3
-        x = self.DropOut(x)
-        Rx = self.deconv4(x)
+        # Apply The encoder from the AE architecture
+        x = self.encoder(Rx_tau)
+
+        # Apply the decoder from the AE architecture
+        Rx = self.decoder(x)
 
         # Reshape Output shape: [Batch size, 2N, N]
         Rx_View = Rx.view(Rx.size(0), Rx.size(2), Rx.size(3))
@@ -440,24 +455,30 @@ class SubspaceNetEsprit(SubspaceNet):
         self.batch_size = Rx_tau.shape[0]
 
         ## Architecture flow ##
-        # CNN block #1
-        x = self.conv1(Rx_tau)
-        x = self.anti_rectifier(x)
-        # CNN block #2
-        x = self.conv2(x)
-        x = self.anti_rectifier(x)
-        # CNN block #3
-        x = self.conv3(x)
-        x = self.anti_rectifier(x)
-        # DCNN block #1
-        x = self.deconv2(x)
-        x = self.anti_rectifier(x)
-        # DCNN block #2
-        x = self.deconv3(x)
-        x = self.anti_rectifier(x)
-        # DCNN block #3
-        x = self.DropOut(x)
-        Rx = self.deconv4(x)
+        # # CNN block #1
+        # x = self.conv1(Rx_tau)
+        # x = self.anti_rectifier(x)
+        # # CNN block #2
+        # x = self.conv2(x)
+        # x = self.anti_rectifier(x)
+        # # CNN block #3
+        # x = self.conv3(x)
+        # x = self.anti_rectifier(x)
+        # # DCNN block #1
+        # x = self.deconv2(x)
+        # x = self.anti_rectifier(x)
+        # # DCNN block #2
+        # x = self.deconv3(x)
+        # x = self.anti_rectifier(x)
+        # # DCNN block #3
+        # x = self.DropOut(x)
+        # Rx = self.deconv4(x)
+
+        # Apply The encoder from the AE architecture
+        x = self.encoder(Rx_tau)
+
+        # Apply the decoder from the AE architecture
+        Rx = self.decoder(x)
 
         # Reshape Output shape: [Batch size, 2N, N]
         Rx_View = Rx.view(Rx.size(0), Rx.size(2), Rx.size(3))

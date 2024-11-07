@@ -388,8 +388,13 @@ def train_model(training_params: TrainingParams, model_name: str, checkpoint_pat
                 train_loss = training_params.criterion(
                     DOA_predictions.float(), DOA.float()
                 )
+                # add batch loss to overall epoch loss
+                overall_train_loss += train_loss.item() * len(data[0])
             else:
                 train_loss = training_params.criterion(DOA_predictions, DOA)
+                # add batch loss to overall epoch loss
+                overall_train_loss += train_loss.item()
+
             # Back-propagation stage
             try:
                 train_loss.backward()
@@ -399,13 +404,7 @@ def train_model(training_params: TrainingParams, model_name: str, checkpoint_pat
             optimizer.step()
             # reset gradients
             model.zero_grad()
-            # add batch loss to overall epoch loss
-            if training_params.model_type.startswith("DeepCNN"):
-                # BCE is averaged
-                overall_train_loss += train_loss.item() * len(data[0])
-            else:
-                # RMSPE is summed
-                overall_train_loss += train_loss.item()
+
         # Average the epoch training loss
         overall_train_loss = overall_train_loss / train_length
         loss_train_list.append(overall_train_loss)
