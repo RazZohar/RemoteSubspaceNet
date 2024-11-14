@@ -380,9 +380,11 @@ def train_model(training_params: TrainingParams, model_name: str, checkpoint_pat
             if training_params.model_type.startswith("SubspaceNet"):
                 # Default - SubSpaceNet
                 DOA_predictions = model_output[0]
+                vq_loss = model_output[-1]
             else:
                 # Deep Augmented MUSIC or DeepCNN
                 DOA_predictions = model_output
+                vq_loss = 0
             # Compute training loss
             if training_params.model_type.startswith("DeepCNN"):
                 train_loss = training_params.criterion(
@@ -391,7 +393,10 @@ def train_model(training_params: TrainingParams, model_name: str, checkpoint_pat
                 # add batch loss to overall epoch loss
                 overall_train_loss += train_loss.item() * len(data[0])
             else:
-                train_loss = training_params.criterion(DOA_predictions, DOA)
+                ce_loss = training_params.criterion(DOA_predictions, DOA)
+                commitment = 0.2
+                train_loss = ce_loss + commitment * vq_loss
+
                 # add batch loss to overall epoch loss
                 overall_train_loss += train_loss.item()
 
