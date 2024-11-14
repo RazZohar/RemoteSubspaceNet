@@ -35,6 +35,8 @@ from src.plotting import initialize_figures
 from pathlib import Path
 from src.models import ModelGenerator
 
+import src.create_codebook as codebook_creation
+
 # Initialization
 warnings.simplefilter("ignore")
 os.system("cls||clear")
@@ -68,10 +70,11 @@ if __name__ == "__main__":
         "SAVE_TO_FILE": True,  # Saving results to file or present them over CMD
         "CREATE_DATA": False,  # Creating new dataset
         "LOAD_DATA": True,  # Loading data from exist dataset
-        "LOAD_MODEL": False,  # Load specific model for training
-        "TRAIN_MODEL": True,  # Applying training operation
+        "LOAD_MODEL": True,  # Load specific model for training
+        "TRAIN_MODEL": False,  # Applying training operation
         "SAVE_MODEL": True,  # Saving tuned model
         "EVALUATE_MODE": True,  # Evaluating desired algorithms
+        "CREATE_CODEBOOK" : True, # Create the codebook for VQ-VAE
     }
 
     print(f'Start Executing commands')
@@ -210,6 +213,29 @@ if __name__ == "__main__":
             )
         else:
             plt.show()
+
+    if commands["CREATE_CODEBOOK"]:
+        CLUSTERS_COUNT = 256
+        codebook_creation_dataset = torch.utils.data.DataLoader(
+            train_dataset, batch_size=1, shuffle=False, drop_last=False
+        )
+        codebook_creation_subdataset, _ = codebook_creation.get_n_batches(codebook_creation_dataset, num_batches=1024)
+
+        # Load a pretrained model
+        criterion, subspace_criterion = set_criterions("rmse")
+        simulation_parameters = (
+            TrainingParams()
+            .set_model(model=model_config)
+            .load_model(
+                loading_path=saving_path
+                             / "final_models"
+                             / simulation_filename
+            )
+        )
+        model = simulation_parameters.model
+
+        codebook = codebook_creation.create_codebook_command(model.encoder, codebook_creation_subdataset, cb_vec_dim=4, num_clusters=CLUSTERS_COUNT)
+        np.save(saving_path / "codebook.npy", codebook)
 
     # Evaluation stage
     if commands["EVALUATE_MODE"]:

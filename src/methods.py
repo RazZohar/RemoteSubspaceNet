@@ -165,7 +165,7 @@ class SubspaceMethod(object):
                 )
             # Predict the covariance matrix using the SubspaceNet model
             subspacenet_model.eval()
-            covariance_mat = subspacenet_model(X)[-1]
+            covariance_mat = subspacenet_model(X)[-2]
             # Convert to np.array type
             covariance_mat = np.array(covariance_mat.squeeze())
             return covariance_mat

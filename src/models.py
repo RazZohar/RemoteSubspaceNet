@@ -149,7 +149,7 @@ class ModelGenerator(object):
             self.model = DeepCNN(N=system_model_params.N, grid_size=361)
         elif self.model_type.startswith("SubspaceNet"):
             self.model = SubspaceNet(
-                tau=self.tau, M=system_model_params.M, diff_method=self.diff_method
+                tau=self.tau, M=system_model_params.M, diff_method=self.diff_method, quantize=False
             )
         else:
             raise Exception(
@@ -254,6 +254,57 @@ class DeepRootMUSIC(nn.Module):
         )
         return doa_prediction, doa_all_predictions, roots, Rz
 
+class FixedVectorQuantizer(nn.Module):
+    def __init__(self, num_embeddings, codebook_size, lambda_c=0.1, lambda_p=0.33):
+        super(FixedVectorQuantizer, self).__init__()
+
+        self.d = num_embeddings  # The size of the vectors
+        self.p = codebook_size  # Number of vectors in the codebook
+
+        # Initialize the codebook
+        self.codebook = nn.Embedding(self.p, self.d)
+        self.codebook.weight.data.uniform_(-1 / self.p, 1 / self.p)
+
+        # Balancing parameter lambda for the commitment loss
+        self.lambda_c = lambda_c
+        self.lambda_p = lambda_p
+
+    def forward(self, inputs):
+        input_shape = inputs.shape
+
+        # Flatten input
+        flat_input = inputs.view(-1, self.d)
+
+        # Use the entire codebook for quantization
+        actives = self.codebook.weight
+
+        # Calculate distances
+        distances = (torch.sum(flat_input ** 2, dim=1, keepdim=True)
+                     + torch.sum(actives ** 2, dim=1)
+                     - 2 * torch.matmul(flat_input, actives.t()))
+
+        # Encoding
+        encoding_indices = torch.argmin(distances, dim=1).unsqueeze(1)
+        encodings = torch.zeros(encoding_indices.shape[0], self.p, device=inputs.device)
+        encodings.scatter_(1, encoding_indices, 1)
+
+        # Quantize and unflatten
+        quantized = torch.matmul(encodings, self.codebook.weight).view(input_shape)
+
+        if self.training:
+            # Loss
+            q_latent_loss = torch.nn.functional.mse_loss(quantized, inputs.detach())  # Commitment loss
+            e_latent_loss = torch.nn.functional.mse_loss(quantized.detach(), inputs)  # Alignment loss
+            cb_loss = q_latent_loss + self.lambda_c * e_latent_loss  # Codebook loss
+
+            # Gradient copying for the straight-through estimator
+            quantized = inputs + (quantized - inputs).detach()
+        else:
+            cb_loss = 0
+
+        return quantized, cb_loss
+
+
 
 class AntiRectifierLayer(nn.Module):
     def __init__(self, function):
@@ -288,7 +339,7 @@ class SubspaceNet(nn.Module):
 
     """
 
-    def __init__(self, tau: int, M: int, diff_method: str = "root_music"):
+    def __init__(self, tau: int, M: int, diff_method: str = "root_music", quantize: bool = False):
         """Initializes the SubspaceNet model.
 
         Args:
@@ -300,6 +351,7 @@ class SubspaceNet(nn.Module):
         super(SubspaceNet, self).__init__()
         self.M = M
         self.tau = tau
+        self.quantize = quantize
         self.conv1 = nn.Conv2d(self.tau, 16, kernel_size=2)
         self.conv2 = nn.Conv2d(32, 32, kernel_size=2)
         self.conv3 = nn.Conv2d(64, 64, kernel_size=2)
@@ -313,7 +365,11 @@ class SubspaceNet(nn.Module):
                                      self.conv3,
                                      self.anti_rectifier_layer)
 
-
+        num_embeddings = 4
+        codebook_size = 256
+        lambda_c = 0.1
+        lambda_p = 0.33
+        self.quantizer = FixedVectorQuantizer(num_embeddings, codebook_size, lambda_c, lambda_p)
 
         self.deconv2 = nn.ConvTranspose2d(128, 32, kernel_size=2)
         self.deconv3 = nn.ConvTranspose2d(64, 16, kernel_size=2)
@@ -391,8 +447,14 @@ class SubspaceNet(nn.Module):
         # Apply The encoder from the AE architecture
         x = self.encoder(Rx_tau)
 
+        # quantize if needed
+        if self.quantize:
+            z_quantized, vq_loss = self.quantizer(x)
+        else:
+            z_quantized, vq_loss = x, 0
+
         # Apply the decoder from the AE architecture
-        Rx = self.decoder(x)
+        Rx = self.decoder(z_quantized)
 
         # Reshape Output shape: [Batch size, 2N, N]
         Rx_View = Rx.view(Rx.size(0), Rx.size(2), Rx.size(3))
@@ -413,7 +475,7 @@ class SubspaceNet(nn.Module):
             # Esprit output
             doa_prediction = method_output
             doa_all_predictions, roots = None, None
-        return doa_prediction, doa_all_predictions, roots, Rz
+        return doa_prediction, doa_all_predictions, roots, Rz, vq_loss
 
 
 class SubspaceNetEsprit(SubspaceNet):
