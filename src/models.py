@@ -409,6 +409,9 @@ class SubspaceNet(nn.Module):
                 f"SubspaceNet.set_diff_method: Method {diff_method} is not defined for SubspaceNet"
             )
 
+    def set_quantize(self, quantize: bool):
+        self.quantize = quantize
+
     def anti_rectifier(self, X):
         """Applies the anti-rectifier operation to the input tensor.
 

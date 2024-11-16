@@ -67,7 +67,7 @@ if __name__ == "__main__":
     dt_string_for_save = now.strftime("%d_%m_%Y_%H_%M")
     # Operations commands
     commands = {
-        "SAVE_TO_FILE": True,  # Saving results to file or present them over CMD
+        "SAVE_TO_FILE": False,  # Saving results to file or present them over CMD
         "CREATE_DATA": False,  # Creating new dataset
         "LOAD_DATA": True,  # Loading data from exist dataset
         "LOAD_MODEL": True,  # Load specific model for training
@@ -217,9 +217,9 @@ if __name__ == "__main__":
     if commands["CREATE_CODEBOOK"]:
         CLUSTERS_COUNT = 256
         codebook_creation_dataset = torch.utils.data.DataLoader(
-            train_dataset, batch_size=1, shuffle=False, drop_last=False
+            train_dataset, batch_size=2048, shuffle=False, drop_last=False
         )
-        codebook_creation_subdataset, _ = codebook_creation.get_n_batches(codebook_creation_dataset, num_batches=1024)
+        codebook_creation_subdataset, _ = codebook_creation.get_n_batches(codebook_creation_dataset, num_batches=4)
 
         # Load a pretrained model
         criterion, subspace_criterion = set_criterions("rmse")
@@ -233,9 +233,62 @@ if __name__ == "__main__":
             )
         )
         model = simulation_parameters.model
-
         codebook = codebook_creation.create_codebook_command(model.encoder, codebook_creation_subdataset, cb_vec_dim=4, num_clusters=CLUSTERS_COUNT)
-        np.save(saving_path / "codebook.npy", codebook)
+        np.save(saving_path / "codebook_{date}.npy".format(date=dt_string_for_save), codebook)
+        print(f'Created the codebook for the subspace with VQ-VAE')
+
+        # Start the fine tunning step
+        model.set_quantize(True)
+        model.quantizer.active_vectors = codebook
+
+        # Train only the decoder
+        for param in model.encoder.parameters():
+            param.requires_grad = False
+
+        #Apply Small train to optimaize with the codebook
+        simulation_parameters = (simulation_parameters
+                                .set_batch_size(2048)
+                                .set_epochs(20)
+                                .set_optimizer(optimizer="Adam", learning_rate=0.00001, weight_decay=1e-9)
+                                .set_training_dataset(train_dataset)
+                                .set_schedular(step_size=80, gamma=0.2)
+                                .set_criterion()
+                                )
+        # Set the New optimzer for quantize and decoder only
+        optimizer = optim.Adam(list(model.decoder.parameters()), lr=0.00001, weight_decay=1e-9)
+        simulation_parameters.optimizer = optimizer
+
+        simulation_filename = simulation_filename + '_Quantized_{date}'.format(date=dt_string_for_save)
+        # Print training simulation details
+        simulation_summary(
+            system_model_params=system_model_params,
+            model_type=model_config.model_type,
+            parameters=simulation_parameters,
+            phase="training",
+        )
+        # Perform simulation training and evaluation stages
+        model, loss_train_list, loss_valid_list = train(
+            training_parameters=simulation_parameters,
+            model_name=simulation_filename,
+            saving_path=saving_path,
+        )
+        # Save model weights
+        if commands["SAVE_MODEL"]:
+            torch.save(
+                model.state_dict(),
+                saving_path / "final_models" / Path(simulation_filename),
+            )
+        # Plots saving
+        if commands["SAVE_TO_FILE"]:
+            plt.savefig(
+                simulations_path
+                / "results"
+                / "plots"
+                / Path(dt_string_for_save + r".png")
+            )
+        else:
+            plt.show()
+
 
     # Evaluation stage
     if commands["EVALUATE_MODE"]:
