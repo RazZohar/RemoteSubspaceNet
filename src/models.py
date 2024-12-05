@@ -149,7 +149,8 @@ class ModelGenerator(object):
             self.model = DeepCNN(N=system_model_params.N, grid_size=361)
         elif self.model_type.startswith("SubspaceNet"):
             self.model = SubspaceNet(
-                tau=self.tau, M=system_model_params.M, diff_method=self.diff_method, quantize=False
+                tau=self.tau, M=system_model_params.M, diff_method=self.diff_method,
+                quantize=False, codebook_size=system_model_params.codebook_size
             )
         else:
             raise Exception(
@@ -339,7 +340,7 @@ class SubspaceNet(nn.Module):
 
     """
 
-    def __init__(self, tau: int, M: int, diff_method: str = "root_music", quantize: bool = False):
+    def __init__(self, tau: int, M: int, diff_method: str = "root_music", quantize: bool = False, codebook_size: int = 256):
         """Initializes the SubspaceNet model.
 
         Args:
@@ -366,10 +367,10 @@ class SubspaceNet(nn.Module):
                                      self.anti_rectifier_layer)
 
         num_embeddings = 4
-        codebook_size = 256
+        self.codebook_size = codebook_size
         lambda_c = 0.1
         lambda_p = 0.33
-        self.quantizer = FixedVectorQuantizer(num_embeddings, codebook_size, lambda_c, lambda_p)
+        self.quantizer = FixedVectorQuantizer(num_embeddings, self.codebook_size, lambda_c, lambda_p)
 
         self.deconv2 = nn.ConvTranspose2d(128, 32, kernel_size=2)
         self.deconv3 = nn.ConvTranspose2d(64, 16, kernel_size=2)

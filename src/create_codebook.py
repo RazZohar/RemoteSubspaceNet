@@ -26,7 +26,7 @@ def create_codebook_command(encoder : nn.Sequential, input_data, cb_vec_dim, num
     # K-Means Quantization Setup
     kmeans_kwargs = {
         "init": "k-means++",
-        "n_init": 3,
+        "n_init": 11,
         "max_iter": 300,
     }
 
@@ -40,3 +40,7 @@ def create_codebook_command(encoder : nn.Sequential, input_data, cb_vec_dim, num
     return torch.Tensor(kmeans.cluster_centers_)
 
 
+def init_weights_lbg(module, codebook):
+    weight_tensor = torch.Tensor(codebook)
+    module.weight = nn.Parameter(weight_tensor)
+    return module.weight

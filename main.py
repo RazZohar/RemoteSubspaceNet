@@ -2,9 +2,9 @@
     Details
     -------
     Name: main.py
-    Authors: D. H. Shmuel
+    Authors: R Zohar
     Created: 01/10/21
-    Edited: 30/06/23
+    Edited: 01/12/24
 
     Purpose
     --------
@@ -70,12 +70,15 @@ if __name__ == "__main__":
         "SAVE_TO_FILE": False,  # Saving results to file or present them over CMD
         "CREATE_DATA": False,  # Creating new dataset
         "LOAD_DATA": True,  # Loading data from exist dataset
-        "LOAD_MODEL": True,  # Load specific model for training
-        "TRAIN_MODEL": False,  # Applying training operation
+        "LOAD_MODEL": False,  # Load specific model for training
+        "TRAIN_MODEL": True,  # Applying training operation
         "SAVE_MODEL": True,  # Saving tuned model
         "EVALUATE_MODE": True,  # Evaluating desired algorithms
         "CREATE_CODEBOOK" : True, # Create the codebook for VQ-VAE
+        "TRAIN_QUANTIZED" : True, # Train the model for the quantization
     }
+
+    CODEBOOK_SIZE = 4
 
     print(f'Start Executing commands')
     # Saving simulation scores to external file
@@ -96,6 +99,7 @@ if __name__ == "__main__":
         .set_parameter("eta", 0)
         .set_parameter("bias", 0.05)
         .set_parameter("sv_noise_var", 0)
+        .set_parameter("codebook_size", CODEBOOK_SIZE)
     )
     print(f'Set model configuration')
     # Generate model configuration
@@ -191,6 +195,85 @@ if __name__ == "__main__":
             parameters=simulation_parameters,
             phase="training",
         )
+
+        # Perform simulation training and evaluation stages
+        model, loss_train_list, loss_valid_list = train(
+            training_parameters=simulation_parameters,
+            model_name=simulation_filename,
+            saving_path=saving_path,
+        )
+        # Save model weights
+        if commands["SAVE_MODEL"]:
+
+            simulation_filename = simulation_filename + f'_codebook_{CODEBOOK_SIZE}'
+            torch.save(
+                model.state_dict(),
+                saving_path / "final_models" / Path(simulation_filename),
+            )
+        # Plots saving
+        if commands["SAVE_TO_FILE"]:
+            plt.savefig(
+                simulations_path
+                / "results"
+                / "plots"
+                / Path(dt_string_for_save + r".png")
+            )
+        else:
+            plt.show()
+
+    if commands["CREATE_CODEBOOK"]:
+        CLUSTERS_COUNT = CODEBOOK_SIZE
+        codebook_creation_dataset = torch.utils.data.DataLoader(
+            train_dataset, batch_size=2048, shuffle=False, drop_last=False
+        )
+        codebook_creation_subdataset, _ = codebook_creation.get_n_batches(codebook_creation_dataset, num_batches=4)
+
+        # Load a pretrained model
+        criterion, subspace_criterion = set_criterions("rmse")
+        simulation_parameters = (
+            TrainingParams()
+            .set_model(model=model_config)
+            .load_model(
+                loading_path=saving_path
+                             / "final_models"
+                             / simulation_filename
+            )
+        )
+        model = simulation_parameters.model
+        codebook = codebook_creation.create_codebook_command(model.encoder, codebook_creation_subdataset, cb_vec_dim=4, num_clusters=CLUSTERS_COUNT)
+        codebook_filename = "codebook_{date}_{codebook_size}.npy".format(date=dt_string_for_save, codebook_size=CODEBOOK_SIZE)
+        np.save(saving_path / codebook_filename, codebook)
+        print(f'Created the codebook for the subspace with VQ-VAE')
+
+        # Start the fine tunning step
+        model.set_quantize(True)
+        model.quantizer.active_vectors = codebook
+
+        # Train only the decoder
+        for param in model.encoder.parameters():
+            param.requires_grad = False
+
+        #Apply Small train to optimaize with the codebook
+        simulation_parameters = (simulation_parameters
+                                .set_batch_size(2048)
+                                .set_epochs(20)
+                                .set_optimizer(optimizer="Adam", learning_rate=0.00001, weight_decay=1e-9)
+                                .set_training_dataset(train_dataset)
+                                .set_schedular(step_size=80, gamma=0.2)
+                                .set_criterion()
+                                )
+        # Set the New optimzer for quantize and decoder only
+        optimizer = optim.Adam(list(model.decoder.parameters()), lr=0.0001, weight_decay=1e-8)
+        simulation_parameters.optimizer = optimizer
+
+        simulation_filename = simulation_filename + '_Quantized_{date}_{codebook_size}'.format(date=dt_string_for_save, codebook_size=CODEBOOK_SIZE)
+        # Print training simulation details
+        simulation_summary(
+            system_model_params=system_model_params,
+            model_type=model_config.model_type,
+            parameters=simulation_parameters,
+            phase="training",
+        )
         # Perform simulation training and evaluation stages
         model, loss_train_list, loss_valid_list = train(
             training_parameters=simulation_parameters,
@@ -214,13 +297,9 @@ if __name__ == "__main__":
         else:
             plt.show()
 
-    if commands["CREATE_CODEBOOK"]:
-        CLUSTERS_COUNT = 256
-        codebook_creation_dataset = torch.utils.data.DataLoader(
-            train_dataset, batch_size=2048, shuffle=False, drop_last=False
-        )
-        codebook_creation_subdataset, _ = codebook_creation.get_n_batches(codebook_creation_dataset, num_batches=4)
-
+    if commands["TRAIN_QUANTIZED"]:
+        CLUSTERS_COUNT = CODEBOOK_SIZE
+        #simulation_filename = simulation_filename + f'_Quantized_{CODEBOOK_SIZE}'
         # Load a pretrained model
         criterion, subspace_criterion = set_criterions("rmse")
         simulation_parameters = (
@@ -233,32 +312,29 @@ if __name__ == "__main__":
             )
         )
         model = simulation_parameters.model
-        codebook = codebook_creation.create_codebook_command(model.encoder, codebook_creation_subdataset, cb_vec_dim=4, num_clusters=CLUSTERS_COUNT)
-        np.save(saving_path / "codebook_{date}.npy".format(date=dt_string_for_save), codebook)
-        print(f'Created the codebook for the subspace with VQ-VAE')
+
+        print(f'Load the codebook for the subspace with VQ-VAE')
+        codebook = np.load(saving_path / codebook_filename)
+
 
         # Start the fine tunning step
         model.set_quantize(True)
         model.quantizer.active_vectors = codebook
+        model.quantizer.apply(lambda module: codebook_creation.init_weights_lbg(module, codebook))
 
         # Train only the decoder
-        for param in model.encoder.parameters():
-            param.requires_grad = False
-
+        #simulation_filename = simulation_filename + '_Quantized_Trained'
+        simulation_filename = simulation_filename + '_Quantized_{date}_Trained_{codebook_size}'.format(date=dt_string_for_save, codebook_size=CODEBOOK_SIZE)
         #Apply Small train to optimaize with the codebook
         simulation_parameters = (simulation_parameters
-                                .set_batch_size(2048)
-                                .set_epochs(20)
-                                .set_optimizer(optimizer="Adam", learning_rate=0.00001, weight_decay=1e-9)
+                                .set_batch_size(1024)
+                                .set_epochs(80)
+                                .set_optimizer(optimizer="Adam", learning_rate=0.00001, weight_decay=1e-6)
                                 .set_training_dataset(train_dataset)
                                 .set_schedular(step_size=80, gamma=0.2)
                                 .set_criterion()
                                 )
-        # Set the New optimzer for quantize and decoder only
-        optimizer = optim.Adam(list(model.decoder.parameters()), lr=0.00001, weight_decay=1e-9)
-        simulation_parameters.optimizer = optimizer
 
-        simulation_filename = simulation_filename + '_Quantized_{date}'.format(date=dt_string_for_save)
         # Print training simulation details
         simulation_summary(
             system_model_params=system_model_params,
