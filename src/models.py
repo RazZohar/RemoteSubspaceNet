@@ -305,6 +305,13 @@ class FixedVectorQuantizer(nn.Module):
 
         return quantized, cb_loss
 
+    # By product of this function is uninatalized codebook
+    def set_codebook_size(self, codebook_size):
+        self.p = codebook_size
+
+        # Initialize the codebook
+        self.codebook = nn.Embedding(self.p, self.d)
+        self.codebook.weight.data.uniform_(-1 / self.p, 1 / self.p)
 
 
 class AntiRectifierLayer(nn.Module):

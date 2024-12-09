@@ -46,6 +46,61 @@ plt.close("all")
 plot_spectrum_flag = True
 
 
+def evaluate_model_command():
+    global criterion, subspace_criterion, test_dataset, generic_test_dataset, samples_model, simulation_parameters, model
+    # Initialize figures dict for plotting
+    figures = initialize_figures()
+    # Define loss measure for evaluation
+    criterion, subspace_criterion = set_criterions("rmse")
+    # Load datasets for evaluation
+    if not (commands["CREATE_DATA"] or commands["LOAD_DATA"]):
+        test_dataset, generic_test_dataset, samples_model = load_datasets(
+            system_model_params=system_model_params,
+            model_type=model_config.model_type,
+            samples_size=samples_size,
+            datasets_path=datasets_path,
+            train_test_ratio=train_test_ratio,
+        )
+    # Generate DataLoader objects
+    model_test_dataset = torch.utils.data.DataLoader(
+        test_dataset, batch_size=1, shuffle=False, drop_last=False
+    )
+    generic_test_dataset = torch.utils.data.DataLoader(
+        generic_test_dataset, batch_size=1, shuffle=False, drop_last=False
+    )
+    # Load pre-trained model
+    if not commands["TRAIN_MODEL"]:
+        # Define an evaluation parameters instance
+        simulation_parameters = (
+            TrainingParams()
+            .set_model(model=model_config)
+            .load_model(
+                loading_path=saving_path
+                             / "final_models"
+                             / simulation_filename
+            )
+        )
+        model = simulation_parameters.model
+    # print simulation summary details
+    simulation_summary(
+        system_model_params=system_model_params,
+        model_type=model_config.model_type,
+        phase="evaluation",
+        parameters=simulation_parameters,
+    )
+    # Evaluate DNN models, augmented and subspace methods
+    evaluate(
+        model=model,
+        model_type=model_config.model_type,
+        model_test_dataset=model_test_dataset,
+        generic_test_dataset=generic_test_dataset,
+        criterion=criterion,
+        subspace_criterion=subspace_criterion,
+        system_model=samples_model,
+        figures=figures,
+        plot_spec=plot_spectrum_flag,
+    )
+
 
 if __name__ == "__main__":
     # Initialize paths
@@ -70,8 +125,8 @@ if __name__ == "__main__":
         "SAVE_TO_FILE": False,  # Saving results to file or present them over CMD
         "CREATE_DATA": False,  # Creating new dataset
         "LOAD_DATA": True,  # Loading data from exist dataset
-        "LOAD_MODEL": False,  # Load specific model for training
-        "TRAIN_MODEL": True,  # Applying training operation
+        "LOAD_MODEL": True,  # Load specific model for training
+        "TRAIN_MODEL": False,  # Applying training operation
         "SAVE_MODEL": True,  # Saving tuned model
         "EVALUATE_MODE": True,  # Evaluating desired algorithms
         "CREATE_CODEBOOK" : True, # Create the codebook for VQ-VAE
@@ -205,7 +260,7 @@ if __name__ == "__main__":
         # Save model weights
         if commands["SAVE_MODEL"]:
 
-            simulation_filename = simulation_filename + f'_codebook_{CODEBOOK_SIZE}'
+            simulation_filename = simulation_filename + f'_VQVAE_'
             torch.save(
                 model.state_dict(),
                 saving_path / "final_models" / Path(simulation_filename),
@@ -221,6 +276,9 @@ if __name__ == "__main__":
         else:
             plt.show()
 
+        # For this purpose we use evaluate
+        #evaluate_model_command()
+
     if commands["CREATE_CODEBOOK"]:
         CLUSTERS_COUNT = CODEBOOK_SIZE
         codebook_creation_dataset = torch.utils.data.DataLoader(
@@ -230,6 +288,9 @@ if __name__ == "__main__":
 
         # Load a pretrained model
         criterion, subspace_criterion = set_criterions("rmse")
+
+        # Load the VQ_VAE model
+        simulation_filename = simulation_filename + f'_VQVAE_'
         simulation_parameters = (
             TrainingParams()
             .set_model(model=model_config)
@@ -240,14 +301,19 @@ if __name__ == "__main__":
             )
         )
         model = simulation_parameters.model
-        codebook = codebook_creation.create_codebook_command(model.encoder, codebook_creation_subdataset, cb_vec_dim=4, num_clusters=CLUSTERS_COUNT)
+        CODEBOOK_SIZE = 32
+        codebook = codebook_creation.create_codebook_command(model.encoder, codebook_creation_subdataset, cb_vec_dim=4, num_clusters=CODEBOOK_SIZE)
         codebook_filename = "codebook_{date}_{codebook_size}.npy".format(date=dt_string_for_save, codebook_size=CODEBOOK_SIZE)
         np.save(saving_path / codebook_filename, codebook)
-        print(f'Created the codebook for the subspace with VQ-VAE')
 
         # Start the fine tunning step
+        model.codebook_size = CODEBOOK_SIZE
         model.set_quantize(True)
+        model.quantizer.set_codebook_size(CODEBOOK_SIZE) # Set empty codebook at requested size
         model.quantizer.active_vectors = codebook
+
+        print(
+            f'Created the codebook for the subspace with VQ-VAE, with codebook size = {model.quantizer.p}')
 
         # Train only the decoder
         for param in model.encoder.parameters():
@@ -297,6 +363,9 @@ if __name__ == "__main__":
         else:
             plt.show()
 
+        # For this purpose we use evaluate
+        #evaluate_model_command()
+
     if commands["TRAIN_QUANTIZED"]:
         CLUSTERS_COUNT = CODEBOOK_SIZE
         #simulation_filename = simulation_filename + f'_Quantized_{CODEBOOK_SIZE}'
@@ -313,13 +382,16 @@ if __name__ == "__main__":
         )
         model = simulation_parameters.model
 
+        CODEBOOK_SIZE = 32
         print(f'Load the codebook for the subspace with VQ-VAE')
         codebook = np.load(saving_path / codebook_filename)
 
 
         # Start the fine tunning step
         model.set_quantize(True)
+        model.quantizer.set_codebook_size(CODEBOOK_SIZE)
         model.quantizer.active_vectors = codebook
+
         model.quantizer.apply(lambda module: codebook_creation.init_weights_lbg(module, codebook))
 
         # Train only the decoder
@@ -381,7 +453,6 @@ if __name__ == "__main__":
                 datasets_path=datasets_path,
                 train_test_ratio=train_test_ratio,
             )
-
         # Generate DataLoader objects
         model_test_dataset = torch.utils.data.DataLoader(
             test_dataset, batch_size=1, shuffle=False, drop_last=False
@@ -397,8 +468,8 @@ if __name__ == "__main__":
                 .set_model(model=model_config)
                 .load_model(
                     loading_path=saving_path
-                    / "final_models"
-                    / simulation_filename
+                                 / "final_models"
+                                 / simulation_filename
                 )
             )
             model = simulation_parameters.model
@@ -421,5 +492,6 @@ if __name__ == "__main__":
             figures=figures,
             plot_spec=plot_spectrum_flag,
         )
+
     plt.show()
     print("end")
