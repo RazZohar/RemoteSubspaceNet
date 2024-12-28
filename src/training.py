@@ -181,7 +181,7 @@ class TrainingParams(object):
         self
         """
         # Load model from given path
-        self.model.load_state_dict(torch.load(loading_path, map_location=device))
+        self.model.load_state_dict(torch.load(loading_path, map_location=device), strict=False)
         return self
 
     def set_optimizer(self, optimizer: str, learning_rate: float, weight_decay: float):
@@ -394,8 +394,7 @@ def train_model(training_params: TrainingParams, model_name: str, checkpoint_pat
                 overall_train_loss += train_loss.item() * len(data[0])
             else:
                 ce_loss = training_params.criterion(DOA_predictions, DOA)
-                commitment = 0.2
-                train_loss = ce_loss + commitment * vq_loss
+                train_loss = ce_loss + vq_loss
 
                 # add batch loss to overall epoch loss
                 overall_train_loss += train_loss.item()

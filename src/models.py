@@ -42,9 +42,14 @@ import torch
 import torch.nn as nn
 import numpy as np
 import warnings
+
+from torch.ao.quantization import quantize
+
+import src.qunatizer
 from src.utils import gram_diagonal_overload, device
 from src.utils import sum_of_diags_torch, find_roots_torch
 
+from src.qunatizer import FixedVectorQuantizer, AdaptiveVectorQuantizer
 
 warnings.simplefilter("ignore")
 # Constants
@@ -270,6 +275,10 @@ class FixedVectorQuantizer(nn.Module):
         self.lambda_c = lambda_c
         self.lambda_p = lambda_p
 
+        # Track codebook usage
+        self.register_buffer("codebook_usage", torch.zeros(codebook_size))
+        self.general_codebook_usage = 0
+
     def forward(self, inputs):
         input_shape = inputs.shape
 
@@ -292,6 +301,11 @@ class FixedVectorQuantizer(nn.Module):
         # Quantize and unflatten
         quantized = torch.matmul(encodings, self.codebook.weight).view(input_shape)
 
+        # Track codebook usage
+        self.update_codebook_usage(encoding_indices)
+        self.general_codebook_usage = torch.unique(encoding_indices).numel()
+
+
         if self.training:
             # Loss
             q_latent_loss = torch.nn.functional.mse_loss(quantized, inputs.detach())  # Commitment loss
@@ -312,6 +326,24 @@ class FixedVectorQuantizer(nn.Module):
         # Initialize the codebook
         self.codebook = nn.Embedding(self.p, self.d)
         self.codebook.weight.data.uniform_(-1 / self.p, 1 / self.p)
+
+        # Track codebook usage
+        self.register_buffer("codebook_usage", torch.zeros(codebook_size))
+
+    def update_codebook_usage(self, indices):
+        # Count usage of each codebook entry
+        with torch.no_grad():
+            flattened_indices = indices.view(-1)
+            counts = torch.bincount(flattened_indices, minlength=self.p)
+            self.codebook_usage += counts
+
+    def reset_codebook_usage(self):
+        # Reset codebook usage tracking
+        self.codebook_usage.zero_()
+
+    def visualize_codebook_usage(self):
+        # Visualize codebook usage
+        return self.codebook_usage.cpu().numpy()
 
 
 class AntiRectifierLayer(nn.Module):
@@ -382,7 +414,7 @@ class SubspaceNet(nn.Module):
         self.deconv2 = nn.ConvTranspose2d(128, 32, kernel_size=2)
         self.deconv3 = nn.ConvTranspose2d(64, 16, kernel_size=2)
         self.deconv4 = nn.ConvTranspose2d(32, 1, kernel_size=2)
-        self.DropOut = nn.Dropout(0.2)
+        self.DropOut = nn.Dropout(0.25)
         self.ReLU = nn.ReLU()
 
         # Define The decoder of the AE architecture
@@ -392,6 +424,8 @@ class SubspaceNet(nn.Module):
                                      self.anti_rectifier_layer,
                                      self.DropOut,
                                      self.deconv4)
+
+        self.__unique_indices_set = set()
 
         # Set the subspace method for training
         self.set_diff_method(diff_method)
@@ -461,6 +495,9 @@ class SubspaceNet(nn.Module):
         # quantize if needed
         if self.quantize:
             z_quantized, vq_loss = self.quantizer(x)
+
+            self.__unique_indices_set.update(torch.unique(z_quantized).tolist())
+            self.codebook_utilization = len(self.__unique_indices_set) / self.codebook_size
         else:
             z_quantized, vq_loss = x, 0
 
@@ -528,25 +565,6 @@ class SubspaceNetEsprit(SubspaceNet):
         self.batch_size = Rx_tau.shape[0]
 
         ## Architecture flow ##
-        # # CNN block #1
-        # x = self.conv1(Rx_tau)
-        # x = self.anti_rectifier(x)
-        # # CNN block #2
-        # x = self.conv2(x)
-        # x = self.anti_rectifier(x)
-        # # CNN block #3
-        # x = self.conv3(x)
-        # x = self.anti_rectifier(x)
-        # # DCNN block #1
-        # x = self.deconv2(x)
-        # x = self.anti_rectifier(x)
-        # # DCNN block #2
-        # x = self.deconv3(x)
-        # x = self.anti_rectifier(x)
-        # # DCNN block #3
-        # x = self.DropOut(x)
-        # Rx = self.deconv4(x)
-
         # Apply The encoder from the AE architecture
         x = self.encoder(Rx_tau)
 

@@ -4,6 +4,8 @@ import torch
 import torch.nn as nn
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
+import torch
+from torch_cluster import knn
 
 import numpy as np
 from matplotlib.pyplot import plot as plt
@@ -57,22 +59,66 @@ def create_codebook_command(encoder : nn.Sequential, input_data, cb_vec_dim, num
     kmeans_kwargs = {
         "init": "k-means++",
         "n_init": 11,
-        "max_iter": 300,
+        "max_iter": 100,
     }
 
+    input_data = input_data.to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))
     with torch.no_grad():
         z_e = encoder(input_data)
     z_e = z_e - z_e.mean()
     flatten_ze = z_e.view(-1, cb_vec_dim)
 
-    kmeans = KMeans(num_clusters, **kmeans_kwargs)
-    kmeans.fit(flatten_ze.cpu().numpy())
+    #kmeans = KMeans(num_clusters, **kmeans_kwargs)
+    #kmeans.fit(flatten_ze.cpu().numpy())
 
-    codebook_vectors = torch.Tensor(kmeans.cluster_centers_)
+    #codebook_vectors = torch.Tensor(kmeans.cluster_centers_)
+    codebook_vectors = get_codebook_vectors(flatten_ze, num_clusters, num_iters=100)
     
     #add_figure_encoder(z_e, kmeans.cluster_centers_)
     return codebook_vectors
 
+
+def get_codebook_vectors(flatten_ze, num_clusters, num_iters):
+
+    """
+    Perform k-means clustering using PyTorch on GPU.
+
+    Args:
+        flatten_ze (torch.Tensor): Data to cluster, shape (N, D). Should be on GPU.
+        num_clusters (int): Number of clusters.
+        num_iters (int): Number of k-means iterations.
+
+    Returns:
+        torch.Tensor: Codebook vectors (cluster centers), shape (num_clusters, D).
+    """
+    assert flatten_ze.is_cuda, "Input data must be on GPU"
+    assert flatten_ze.ndim == 2, "Input tensor must be 2D (N, D)"
+
+    device = flatten_ze.device
+    N, D = flatten_ze.shape
+
+    # Randomly initialize cluster centers
+    indices = torch.randperm(N, device=device)[:num_clusters]
+    centroids = flatten_ze[indices]  # Initial cluster centers, shape (num_clusters, D)
+
+    for _ in range(num_iters):
+        # Compute distances and assign each point to the nearest centroid
+        distances = torch.cdist(flatten_ze, centroids, p=2)  # Shape: (N, num_clusters)
+        cluster_assignments = torch.argmin(distances, dim=1)  # Shape: (N,)
+
+        # Update centroids
+        new_centroids = torch.zeros_like(centroids)
+        for k in range(num_clusters):
+            members = flatten_ze[cluster_assignments == k]
+            if members.size(0) > 0:
+                new_centroids[k] = members.mean(dim=0)
+
+        # Check for convergence (optional)
+        if torch.allclose(new_centroids, centroids, atol=1e-4):
+            break
+        centroids = new_centroids
+
+    return centroids
 
 def init_weights_lbg(module, codebook):
     weight_tensor = torch.Tensor(codebook)
