@@ -492,14 +492,16 @@ class SubspaceNet(nn.Module):
         # Apply The encoder from the AE architecture
         x = self.encoder(Rx_tau)
 
+        x_normalized = x - x.mean()
+
         # quantize if needed
         if self.quantize:
-            z_quantized, vq_loss = self.quantizer(x)
+            z_quantized, vq_loss = self.quantizer(x_normalized)
 
             self.__unique_indices_set.update(torch.unique(z_quantized).tolist())
             self.codebook_utilization = len(self.__unique_indices_set) / self.codebook_size
         else:
-            z_quantized, vq_loss = x, 0
+            z_quantized, vq_loss = x_normalized, 0
 
         # Apply the decoder from the AE architecture
         Rx = self.decoder(z_quantized)

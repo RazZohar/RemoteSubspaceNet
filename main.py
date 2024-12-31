@@ -128,7 +128,7 @@ if __name__ == "__main__":
         "LOAD_MODEL": True,  # Load specific model for training
         "TRAIN_MODEL": False,  # Applying training operation
         "SAVE_MODEL": True,  # Saving tuned model
-        "EVALUATE_MODE": True,  # Evaluating desired algorithms
+        "EVALUATE_MODE": False,  # Evaluating desired algorithms
         "CREATE_CODEBOOK" : True, # Create the codebook for VQ-VAE
         "TRAIN_QUANTIZED" : False, # Train the model for the quantization
     }
@@ -281,10 +281,14 @@ if __name__ == "__main__":
 
     if commands["CREATE_CODEBOOK"]:
         CLUSTERS_COUNT = CODEBOOK_SIZE
+
+        #codebook_creation_subdataset, _ = codebook_creation.get_n_batches(codebook_creation_dataset, num_batches=25)
+
+        codebook_creation_subset = torch.utils.data.Subset(train_dataset, torch.arange(samples_size * 0.8, dtype=torch.int64))
+
         codebook_creation_dataset = torch.utils.data.DataLoader(
-            train_dataset, batch_size=1024, shuffle=True, drop_last=False
+            codebook_creation_subset, batch_size=1024, shuffle=False, drop_last=False
         )
-        codebook_creation_subdataset, _ = codebook_creation.get_n_batches(codebook_creation_dataset, num_batches=20)
 
         # Load a pretrained model
         criterion, subspace_criterion = set_criterions("rmse")
@@ -302,8 +306,8 @@ if __name__ == "__main__":
         )
         model = simulation_parameters.model
 
-        CODEBOOK_SIZE = 64
-        codebook = codebook_creation.create_codebook_command(model.encoder, codebook_creation_subdataset, cb_vec_dim=4, num_clusters=CODEBOOK_SIZE)
+        CODEBOOK_SIZE = 16
+        codebook = codebook_creation.create_codebook_command(model.encoder, codebook_creation_dataset, cb_vec_dim=4, num_clusters=CODEBOOK_SIZE)
         codebook_filename = "codebook_{date}_{codebook_size}.npy".format(date=dt_string_for_save, codebook_size=CODEBOOK_SIZE)
         codebook_cpu = codebook.cpu()
         np.save(saving_path / codebook_filename, codebook_cpu)
@@ -329,16 +333,22 @@ if __name__ == "__main__":
                                 .set_epochs(20)
                                 .set_optimizer(optimizer="Adam", learning_rate=0.00001, weight_decay=1e-9)
                                 .set_training_dataset(train_dataset)
-                                .set_schedular(step_size=7, gamma=0.3)
+                                .set_schedular(step_size=10, gamma=0.5)
                                 .set_criterion()
                                 )
         # Set the New optimzer for quantize and decoder only
-        optimizer = optim.Adam(list(model.decoder.parameters()), lr=0.0004, weight_decay=1e-4)
+        optimizer = optim.Adam(list(model.decoder.parameters()), lr=0.00005, weight_decay=1e-4)
         simulation_parameters.optimizer = optimizer
         # Assign schedular for learning rate decay
-        simulation_parameters.schedular = torch.optim.lr_scheduler.StepLR(
+        simulation_parameters.schedular = (
+            torch.optim.lr_scheduler.StepLR(
             simulation_parameters.optimizer, step_size=simulation_parameters.step_size, gamma=simulation_parameters.gamma
-        )
+        ))
+        # Assign schedular for learning rate decay
+        #simulation_parameters.schedular = (
+        #    torch.optim.lr_scheduler.ReduceLROnPlateau(
+        #        simulation_parameters.optimizer, mode='min', factor=0.6, patience=2, verbose=True, min_lr=1e-5
+        #    ))
 
         simulation_filename = simulation_filename + '_Quantized_{date}_{codebook_size}'.format(date=dt_string_for_save, codebook_size=CODEBOOK_SIZE)
         # Print training simulation details

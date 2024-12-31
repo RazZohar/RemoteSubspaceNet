@@ -412,8 +412,7 @@ def train_model(training_params: TrainingParams, model_name: str, checkpoint_pat
         # Average the epoch training loss
         overall_train_loss = overall_train_loss / train_length
         loss_train_list.append(overall_train_loss)
-        # Update schedular
-        training_params.schedular.step()
+
         # Calculate evaluation loss
         valid_loss = evaluate_dnn_model(
             model,
@@ -421,6 +420,11 @@ def train_model(training_params: TrainingParams, model_name: str, checkpoint_pat
             training_params.criterion,
             model_type=training_params.model_type,
         )
+
+        #TODO: find a way to handler multiple scheduler with adaptive learning rate
+        # Update schedular
+        training_params.schedular.step()
+
         loss_valid_list.append(valid_loss)
         # Report results
         print(

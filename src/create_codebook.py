@@ -10,6 +10,10 @@ from torch_cluster import knn
 import numpy as np
 from matplotlib.pyplot import plot as plt
 
+
+from torch.autograd import Variable
+from tqdm import tqdm
+
 def get_n_batches(data_loader, num_batches):
     collected_batches = 0
     all_samples = []
@@ -52,7 +56,7 @@ def add_figure_encoder(flatten_ze, cluster_centers_):
     plt.savefig(f'scatter_plot_codebook_{codebook_size}.png', dpi=300, bbox_inches='tight')
 
 
-def create_codebook_command(encoder : nn.Sequential, input_data, cb_vec_dim, num_clusters):
+def create_codebook_command(encoder : nn.Sequential, input_dataset, cb_vec_dim, num_clusters):
     print(f'Perofrm Codebook generation for VQ-VAE architecture')
 
     # K-Means Quantization Setup
@@ -62,15 +66,23 @@ def create_codebook_command(encoder : nn.Sequential, input_data, cb_vec_dim, num
         "max_iter": 100,
     }
 
-    input_data = input_data.to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))
-    with torch.no_grad():
-        z_e = encoder(input_data)
-    z_e = z_e - z_e.mean()
-    flatten_ze = z_e.view(-1, cb_vec_dim)
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    flatten_ze_sub = []
+    for data in tqdm(input_dataset):
+        Rx, DOA = data
+
+        # Cast observations and DoA to Variables
+        Rx = Rx.to(device)
+
+        with torch.no_grad():
+            z_e = encoder(Rx)
+        z_e = z_e - z_e.mean()
+        flatten_ze_sub.append(z_e.view(-1, cb_vec_dim))
 
     #kmeans = KMeans(num_clusters, **kmeans_kwargs)
+    flatten_ze = torch.cat(flatten_ze_sub, dim=0)
     #kmeans.fit(flatten_ze.cpu().numpy())
-
+    #flatten_ze = torch.cat(flatten_ze_sub, dim=0)
     #codebook_vectors = torch.Tensor(kmeans.cluster_centers_)
     codebook_vectors = get_codebook_vectors(flatten_ze, num_clusters, num_iters=100)
     
