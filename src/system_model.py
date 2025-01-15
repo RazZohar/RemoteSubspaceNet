@@ -14,7 +14,7 @@ This script defines the SystemModel class for defining the settings of the DoA e
 # Imports
 import numpy as np
 from dataclasses import dataclass
-
+import json
 
 @dataclass
 class SystemModelParams:
@@ -63,6 +63,20 @@ class SystemModelParams:
             SystemModelParams: The SystemModelParams object.
         """
         self.__setattr__(name, value)
+        return self
+
+    def set_params_from_json(self, json_dict):
+        """
+        Iterate over the json keys and set the corresponding SystemModelParams attribute.
+        Args:
+            json_dict: the json object we read from
+
+        Returns:
+            System modelParams: the SystemModelParams object with the matched values from json.
+        """
+        for key, value in json_dict.items():
+            self.set_parameter(key, value)
+
         return self
 
 

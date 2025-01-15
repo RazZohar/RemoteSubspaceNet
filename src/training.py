@@ -48,6 +48,7 @@ from src.system_model import SystemModel, SystemModelParams
 from src.models import SubspaceNet, DeepCNN, DeepAugmentedMUSIC, ModelGenerator
 from src.evaluation import evaluate_dnn_model
 
+import json
 
 class TrainingParams(object):
     """
@@ -284,6 +285,18 @@ class TrainingParams(object):
         self.valid_dataset = torch.utils.data.DataLoader(
             valid_dataset, batch_size=1, shuffle=False, drop_last=False
         )
+        return self
+
+    def set_training_params_from_json(self, json_object):
+        """
+        Sets the training parameters from a JSON object.
+        Args:
+            json_object: The json object we read our training parameters from.
+
+        Returns:
+            TrainingParams object with corresponding values
+        """
+        #TODO: add each param we want to add from json
         return self
 
 

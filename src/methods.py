@@ -54,6 +54,9 @@ from src.models import SubspaceNet
 from src.system_model import SystemModel
 from src.utils import sum_of_diag, find_roots, R2D
 
+import torch
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class SubspaceMethod(object):
     """
@@ -167,7 +170,7 @@ class SubspaceMethod(object):
             subspacenet_model.eval()
             covariance_mat = subspacenet_model(X)[-2]
             # Convert to np.array type
-            covariance_mat = np.array(covariance_mat.squeeze())
+            covariance_mat = torch.Tensor(covariance_mat.squeeze()).to(device)
             return covariance_mat
 
         if mode.startswith("spatial_smoothing"):
@@ -197,7 +200,9 @@ class SubspaceMethod(object):
             signal_subspace (np.ndarray): Signal subspace.
         """
         # Find eigenvalues and eigenvectors (EVD)
-        eigenvalues, eigenvectors = np.linalg.eig(covariance_mat)
+        eigenvalues, eigenvectors = torch.linalg.eig(covariance_mat)
+        eigenvalues = eigenvalues.detach().cpu().numpy().copy()
+        eigenvectors = eigenvectors.detach().cpu().numpy().copy()
         # Sort eigenvectors based on eigenvalues order
         eigenvectors = eigenvectors[:, np.argsort(eigenvalues)[::-1]]
         # Assign signal subspace as the eigenvectors associated with M greatest eigenvalues
@@ -465,6 +470,7 @@ class RootMUSIC(SubspaceMethod):
             pass
         # Calculate covariance matrix
         covariance_mat = self.calculate_covariance(X=X, mode=mode, model=model)
+        covariance_mat = torch.Tensor(covariance_mat).to(device)
         # Get noise subspace
         Un, _ = self.subspace_separation(covariance_mat=covariance_mat, M=M)
         # Generate hermitian noise subspace matrix
@@ -563,6 +569,7 @@ class Esprit(RootMUSIC):
             pass
         # Calculate covariance matrix
         covariance_mat = self.calculate_covariance(X=X, mode=mode, model=model)
+        covariance_mat = torch.Tensor(covariance_mat).to(device)
         # Get noise subspace
         _, Us = self.subspace_separation(covariance_mat=covariance_mat, M=M)
         # Separate the signal subspace into 2 overlapping subspaces
@@ -572,8 +579,9 @@ class Esprit(RootMUSIC):
         )
         # Generate Phi matrix
         phi = np.linalg.pinv(Us_upper) @ Us_lower
+        phi = torch.Tensor(phi).to(device)
         # Find eigenvalues and eigenvectors (EVD) of Phi
-        phi_eigenvalues, _ = np.linalg.eig(phi)
+        phi_eigenvalues, _ = torch.linalg.eig(phi)
         # Calculate DoA out of the eigenvalues of Phi
         doa_predictions = -1 * self.extract_predictions_from_roots(phi_eigenvalues)[0]
         return doa_predictions, M

@@ -128,8 +128,8 @@ if __name__ == "__main__":
         "LOAD_MODEL": True,  # Load specific model for training
         "TRAIN_MODEL": False,  # Applying training operation
         "SAVE_MODEL": True,  # Saving tuned model
-        "EVALUATE_MODE": False,  # Evaluating desired algorithms
-        "CREATE_CODEBOOK" : True, # Create the codebook for VQ-VAE
+        "EVALUATE_MODE": True,  # Evaluating desired algorithms
+        "CREATE_CODEBOOK" : False, # Create the codebook for VQ-VAE
         "TRAIN_QUANTIZED" : False, # Train the model for the quantization
     }
 
@@ -147,22 +147,23 @@ if __name__ == "__main__":
         SystemModelParams()
         .set_parameter("N", 8)
         .set_parameter("M", 3)
-        .set_parameter("T", 200)
+        .set_parameter("T", 50)
         .set_parameter("snr", 10)
         .set_parameter("signal_type", "NarrowBand")
-        .set_parameter("signal_nature", "non-coherent")
+        .set_parameter("signal_nature", "coherent")
         .set_parameter("eta", 0)
-        .set_parameter("bias", 0.05)
+        .set_parameter("bias", 0.0)
         .set_parameter("sv_noise_var", 0)
         .set_parameter("codebook_size", CODEBOOK_SIZE)
     )
     print(f'Set model configuration')
     # Generate model configuration
+    MAXIMAL_TAU = 8
     model_config = (
         ModelGenerator()
         .set_model_type("SubspaceNet")
         .set_diff_method("root_music")
-        .set_tau(8)
+        .set_tau(min(MAXIMAL_TAU, system_model_params.T - 1))
         .set_model(system_model_params)
     )
     print('Generating model configuration')
@@ -231,12 +232,12 @@ if __name__ == "__main__":
         # Assign the training parameters object
         simulation_parameters = (
             TrainingParams()
-            .set_batch_size(2048)
-            .set_epochs(80)
+            .set_batch_size(1024)
+            .set_epochs(40)
             .set_model(model=model_config)
-            .set_optimizer(optimizer="Adam", learning_rate=0.00001, weight_decay=1e-9)
+            .set_optimizer(optimizer="Adam", learning_rate=0.001, weight_decay=1e-5)
             .set_training_dataset(train_dataset)
-            .set_schedular(step_size=80, gamma=0.2)
+            .set_schedular(step_size=20, gamma=0.2)
             .set_criterion()
         )
         if commands["LOAD_MODEL"]:
@@ -260,7 +261,7 @@ if __name__ == "__main__":
         # Save model weights
         if commands["SAVE_MODEL"]:
 
-            simulation_filename = simulation_filename + f'_VQVAE_'
+            simulation_filename = simulation_filename
             torch.save(
                 model.state_dict(),
                 saving_path / "final_models" / Path(simulation_filename),
@@ -280,21 +281,24 @@ if __name__ == "__main__":
         #evaluate_model_command()
 
     if commands["CREATE_CODEBOOK"]:
+        CODEBOOK_SIZE = 128
         CLUSTERS_COUNT = CODEBOOK_SIZE
 
         #codebook_creation_subdataset, _ = codebook_creation.get_n_batches(codebook_creation_dataset, num_batches=25)
 
-        codebook_creation_subset = torch.utils.data.Subset(train_dataset, torch.arange(samples_size * 0.8, dtype=torch.int64))
+        codebook_creation_subset = torch.utils.data.Subset(train_dataset, torch.arange(samples_size, dtype=torch.int64))
 
         codebook_creation_dataset = torch.utils.data.DataLoader(
-            codebook_creation_subset, batch_size=1024, shuffle=False, drop_last=False
+            codebook_creation_subset, batch_size=1024, shuffle=True, drop_last=False
         )
+
 
         # Load a pretrained model
         criterion, subspace_criterion = set_criterions("rmse")
 
         # Load the VQ_VAE model
-        simulation_filename = simulation_filename + f'_VQVAE_'
+        simulation_filename = simulation_filename + f'_VQVAE'
+
         simulation_parameters = (
             TrainingParams()
             .set_model(model=model_config)
@@ -306,9 +310,12 @@ if __name__ == "__main__":
         )
         model = simulation_parameters.model
 
-        CODEBOOK_SIZE = 16
+
         codebook = codebook_creation.create_codebook_command(model.encoder, codebook_creation_dataset, cb_vec_dim=4, num_clusters=CODEBOOK_SIZE)
-        codebook_filename = "codebook_{date}_{codebook_size}.npy".format(date=dt_string_for_save, codebook_size=CODEBOOK_SIZE)
+        base_simulation_name = get_simulation_filename(
+        system_model_params=system_model_params, model_config=model_config
+        )
+        codebook_filename = "codebook_{codebook_size}_{simulation_name}.npy".format(codebook_size=CODEBOOK_SIZE, simulation_name=base_simulation_name)
         codebook_cpu = codebook.cpu()
         np.save(saving_path / codebook_filename, codebook_cpu)
 
@@ -330,15 +337,16 @@ if __name__ == "__main__":
         #Apply Small train to optimaize with the codebook
         simulation_parameters = (simulation_parameters
                                 .set_batch_size(1024)
-                                .set_epochs(20)
+                                .set_epochs(5)
                                 .set_optimizer(optimizer="Adam", learning_rate=0.00001, weight_decay=1e-9)
                                 .set_training_dataset(train_dataset)
                                 .set_schedular(step_size=10, gamma=0.5)
                                 .set_criterion()
                                 )
         # Set the New optimzer for quantize and decoder only
-        optimizer = optim.Adam(list(model.decoder.parameters()), lr=0.00005, weight_decay=1e-4)
+        optimizer = optim.Adam(list(model.decoder.parameters()), lr=0.0005, weight_decay=1e-4)
         simulation_parameters.optimizer = optimizer
+
         # Assign schedular for learning rate decay
         simulation_parameters.schedular = (
             torch.optim.lr_scheduler.StepLR(
@@ -350,7 +358,7 @@ if __name__ == "__main__":
         #        simulation_parameters.optimizer, mode='min', factor=0.6, patience=2, verbose=True, min_lr=1e-5
         #    ))
 
-        simulation_filename = simulation_filename + '_Quantized_{date}_{codebook_size}'.format(date=dt_string_for_save, codebook_size=CODEBOOK_SIZE)
+        simulation_filename = simulation_filename + '_Quantized_{codebook_size}'.format(codebook_size=CODEBOOK_SIZE)
         # Print training simulation details
         simulation_summary(
             system_model_params=system_model_params,
@@ -394,8 +402,14 @@ if __name__ == "__main__":
         #evaluate_model_command()
 
     if commands["TRAIN_QUANTIZED"]:
+        CODEBOOK_SIZE = 128
         CLUSTERS_COUNT = CODEBOOK_SIZE
-        #simulation_filename = simulation_filename + f'_Quantized_{CODEBOOK_SIZE}'
+
+        base_simulation_name = get_simulation_filename(
+            system_model_params=system_model_params, model_config=model_config
+        )
+
+        simulation_filename = base_simulation_name + f'_VQVAE_Quantized_{CODEBOOK_SIZE}'
         # Load a pretrained model
         criterion, subspace_criterion = set_criterions("rmse")
         simulation_parameters = (
@@ -409,26 +423,35 @@ if __name__ == "__main__":
         )
         model = simulation_parameters.model
 
-        CODEBOOK_SIZE = 64
+
         print(f'Load the codebook for the subspace with VQ-VAE')
+        base_simulation_name = get_simulation_filename(
+            system_model_params=system_model_params, model_config=model_config
+        )
+        codebook_filename = "codebook_{codebook_size}_{simulation_name}.npy".format(codebook_size=CODEBOOK_SIZE,
+                                                                                    simulation_name=base_simulation_name)
+
         codebook = np.load(saving_path / codebook_filename)
 
 
         # Start the fine tunning step
+        # Start the fine tunning step
+        model = model.to(device=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+        model.codebook_size = CODEBOOK_SIZE
         model.set_quantize(True)
-        model.quantizer.set_codebook_size(CODEBOOK_SIZE)
+        model.quantizer.set_codebook_size(CODEBOOK_SIZE) # Set empty codebook at requested size
         model.quantizer.active_vectors = codebook
-
+        model.quantizer.lambda_c = 1.0
         model.quantizer.apply(lambda module: codebook_creation.init_weights_lbg(module, codebook))
 
         # Train only the decoder
         #simulation_filename = simulation_filename + '_Quantized_Trained'
-        simulation_filename = simulation_filename + '_Quantized_{date}_Trained_{codebook_size}'.format(date=dt_string_for_save, codebook_size=CODEBOOK_SIZE)
+        simulation_filename = simulation_filename + '_Quantized_Trained_{codebook_size}'.format(codebook_size=CODEBOOK_SIZE)
         #Apply Small train to optimaize with the codebook
         simulation_parameters = (simulation_parameters
-                                .set_batch_size(2048)
-                                .set_epochs(120)
-                                .set_optimizer(optimizer="Adam", learning_rate=1e-5, weight_decay=5e-6)
+                                .set_batch_size(1024)
+                                .set_epochs(10)
+                                .set_optimizer(optimizer="Adam", learning_rate=0.0005, weight_decay=5e-6)
                                 .set_training_dataset(train_dataset)
                                 .set_schedular(step_size=60, gamma=0.8)
                                 .set_criterion()
@@ -464,6 +487,18 @@ if __name__ == "__main__":
         else:
             plt.show()
 
+        # For this purpose we use evaluate
+        usage_counts = model.quantizer.visualize_codebook_usage()
+        plt.figure(figsize=(10, 6))
+        plt.bar(range(len(usage_counts)), usage_counts)
+        plt.xlabel("Codebook Entry Index")
+        plt.ylabel("Usage Count")
+        plt.title(f'Codebook Entry Usage Codebook size ={CODEBOOK_SIZE}')
+        plt.show()
+
+        print(f'The usage of codebook is {(model.quantizer.general_codebook_usage / CODEBOOK_SIZE) * 100:.2f} [%]')
+        # evaluate_model_command()
+
 
     # Evaluation stage
     if commands["EVALUATE_MODE"]:
@@ -489,6 +524,9 @@ if __name__ == "__main__":
         )
         # Load pre-trained model
         if not commands["TRAIN_MODEL"]:
+            #simulation_filename = simulation_filename + f'_VQVAE_Quantized_{CODEBOOK_SIZE}' + '_Quantized_Trained_{codebook_size}'.format(
+            #    codebook_size=CODEBOOK_SIZE)
+
             # Define an evaluation parameters instance
             simulation_parameters = (
                 TrainingParams()

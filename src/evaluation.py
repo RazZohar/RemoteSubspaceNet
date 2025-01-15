@@ -120,6 +120,10 @@ def evaluate_dnn_model(
     if plot_spec and model_type.startswith("SubspaceNet"):
         DOA_all = model_output[1]
         roots = model_output[2]
+
+        DOA_all = model_output[1].cpu().detach().numpy()
+        roots = model_output[2].cpu().detach().numpy()
+        DOA = DOA.cpu().detach().numpy()
         plot_spectrum(
             predictions=DOA_all * R2D,
             true_DOA=DOA[0] * R2D,

@@ -66,7 +66,7 @@ def create_codebook_command(encoder : nn.Sequential, input_dataset, cb_vec_dim, 
         "max_iter": 100,
     }
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     flatten_ze_sub = []
     for data in tqdm(input_dataset):
         Rx, DOA = data
@@ -84,10 +84,44 @@ def create_codebook_command(encoder : nn.Sequential, input_dataset, cb_vec_dim, 
     #kmeans.fit(flatten_ze.cpu().numpy())
     #flatten_ze = torch.cat(flatten_ze_sub, dim=0)
     #codebook_vectors = torch.Tensor(kmeans.cluster_centers_)
-    codebook_vectors = get_codebook_vectors(flatten_ze, num_clusters, num_iters=100)
+    codebook_vectors = get_codebook_vectors(flatten_ze, num_clusters, num_iters=50)
     
     #add_figure_encoder(z_e, kmeans.cluster_centers_)
     return codebook_vectors
+
+
+def batch_cdist_and_argmin(data, centroids, batch_size):
+    """
+    Compute batched pairwise distances (cdist) and global argmin.
+
+    Args:
+        data (torch.Tensor): Data points of shape (N, D).
+        centroids (torch.Tensor): Centroids of shape (K, D).
+        batch_size (int): Batch size for processing.
+
+    Returns:
+        torch.Tensor: Cluster assignments for each data point, shape (N,).
+    """
+    device = data.device
+    num_points = data.size(0)
+    num_centroids = centroids.size(0)
+
+    # Initialize tensor for cluster assignments
+    cluster_assignments = torch.empty(num_points, dtype=torch.long, device=device)
+
+    # Compute distances and assignments batch-wise
+    for start in range(0, num_points, batch_size):
+        end = min(start + batch_size, num_points)
+        batch = data[start:end]  # Get the current batch
+
+        # Compute distances for the batch
+        distances = torch.cdist(batch, centroids, p=2)  # Shape: (batch_size, num_centroids)
+
+        # Find the index of the closest centroid (argmin)
+        cluster_assignments[start:end] = torch.argmin(distances, dim=1)
+
+    return cluster_assignments
+
 
 
 def get_codebook_vectors(flatten_ze, num_clusters, num_iters):
@@ -103,7 +137,7 @@ def get_codebook_vectors(flatten_ze, num_clusters, num_iters):
     Returns:
         torch.Tensor: Codebook vectors (cluster centers), shape (num_clusters, D).
     """
-    assert flatten_ze.is_cuda, "Input data must be on GPU"
+    #assert flatten_ze.is_cuda, "Input data must be on GPU"
     assert flatten_ze.ndim == 2, "Input tensor must be 2D (N, D)"
 
     device = flatten_ze.device
@@ -113,11 +147,15 @@ def get_codebook_vectors(flatten_ze, num_clusters, num_iters):
     indices = torch.randperm(N, device=device)[:num_clusters]
     centroids = flatten_ze[indices]  # Initial cluster centers, shape (num_clusters, D)
 
-    for _ in range(num_iters):
+    for index in range(num_iters):
+        """
+        Calculate the batch distance and then select centeriod globally
+        """
+        cluster_assignments = batch_cdist_and_argmin(flatten_ze, centroids, batch_size=512)
         # Compute distances and assign each point to the nearest centroid
-        distances = torch.cdist(flatten_ze, centroids, p=2)  # Shape: (N, num_clusters)
-        cluster_assignments = torch.argmin(distances, dim=1)  # Shape: (N,)
-
+        #distances = torch.cdist(flatten_ze, centroids, p=2)  # Shape: (N, num_clusters)
+        #cluster_assignments = torch.argmin(distances, dim=1)  # Shape: (N,)
+        print(f'Calculate Cenetroids for LBG iteration {index + 1} / {num_iters}')
         # Update centroids
         new_centroids = torch.zeros_like(centroids)
         for k in range(num_clusters):

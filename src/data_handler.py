@@ -37,7 +37,7 @@ from src.signal_creation import Samples
 from pathlib import Path
 from src.system_model import SystemModelParams
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 
 
@@ -81,7 +81,7 @@ def create_dataset(
         for comb in itertools.combinations(angles_grid, system_model_params.M):
             doa_permutations.append(list(comb))
 
-    if model_type.startswith("DeepCNN") and phase.startswith("train"):
+
         for i, doa in tqdm(enumerate(doa_permutations)):
             # Samples model creation
             samples_model.set_doa(doa)
@@ -109,7 +109,7 @@ def create_dataset(
                     noise_mean=0, noise_variance=1, signal_mean=0, signal_variance=1
                 )[0],
                 dtype=torch.complex64,
-            )
+            ).to(device)
             if model_type.startswith("SubspaceNet"):
                 # Generate auto-correlation tensor
                 X_model = create_autocorrelation_tensor(X, tau).to(torch.float)
@@ -119,7 +119,7 @@ def create_dataset(
             else:
                 X_model = X
             # Ground-truth creation
-            Y = torch.tensor(samples_model.doa, dtype=torch.float64)
+            Y = torch.tensor(samples_model.doa, dtype=torch.float64).to(device)
             generic_dataset.append((X, Y))
             model_dataset.append((X_model, Y))
 
@@ -196,7 +196,7 @@ def autocorrelation_matrix(X: torch.Tensor, lag: int):
         x2 = torch.t(torch.unsqueeze(torch.conj(X[:, t + lag]), 1)).to(device)
         Rx_lag += torch.matmul(x1 - torch.mean(X), x2 - torch.mean(X)).to(device)
     Rx_lag = Rx_lag / (X.shape[-1] - lag)
-    Rx_lag = torch.cat((torch.real(Rx_lag), torch.imag(Rx_lag)), 0)
+    Rx_lag = torch.cat((torch.real(Rx_lag), torch.imag(Rx_lag)), 0).to(device)
     return Rx_lag
 
 
@@ -223,7 +223,7 @@ def create_autocorrelation_tensor(X: torch.Tensor, tau: int):
     Rx_tau = []
     for i in range(tau):
         Rx_tau.append(autocorrelation_matrix(X, lag=i))
-    Rx_autocorr = torch.stack(Rx_tau, dim=0)
+    Rx_autocorr = torch.stack(Rx_tau, dim=0).to(device)
     return Rx_autocorr
 
 
