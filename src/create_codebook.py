@@ -90,7 +90,7 @@ def create_codebook_command(encoder : nn.Sequential, input_dataset, cb_vec_dim, 
     return codebook_vectors
 
 
-def batch_cdist_and_argmin(data, centroids, batch_size):
+def batch_cdist_and_argmin(data, centroids, cluster_assignments_temp, batch_size):
     """
     Compute batched pairwise distances (cdist) and global argmin.
 
@@ -106,8 +106,7 @@ def batch_cdist_and_argmin(data, centroids, batch_size):
     num_points = data.size(0)
     num_centroids = centroids.size(0)
 
-    # Initialize tensor for cluster assignments
-    cluster_assignments = torch.empty(num_points, dtype=torch.long, device=device)
+
 
     # Compute distances and assignments batch-wise
     for start in range(0, num_points, batch_size):
@@ -118,9 +117,9 @@ def batch_cdist_and_argmin(data, centroids, batch_size):
         distances = torch.cdist(batch, centroids, p=2)  # Shape: (batch_size, num_centroids)
 
         # Find the index of the closest centroid (argmin)
-        cluster_assignments[start:end] = torch.argmin(distances, dim=1)
+        cluster_assignments_temp[start:end] = torch.argmin(distances, dim=1)
 
-    return cluster_assignments
+    return cluster_assignments_temp
 
 
 
@@ -144,14 +143,17 @@ def get_codebook_vectors(flatten_ze, num_clusters, num_iters):
     N, D = flatten_ze.shape
 
     # Randomly initialize cluster centers
-    indices = torch.randperm(N, device=device)[:num_clusters]
+    indices = torch.randperm(N)[:num_clusters]
     centroids = flatten_ze[indices]  # Initial cluster centers, shape (num_clusters, D)
+
+    # Initialize tensor for cluster assignments
+    cluster_assignments_temp = torch.empty(N, dtype=torch.long, device=device)
 
     for index in range(num_iters):
         """
         Calculate the batch distance and then select centeriod globally
         """
-        cluster_assignments = batch_cdist_and_argmin(flatten_ze, centroids, batch_size=512)
+        cluster_assignments = batch_cdist_and_argmin(flatten_ze, centroids, cluster_assignments_temp, batch_size=512)
         # Compute distances and assign each point to the nearest centroid
         #distances = torch.cdist(flatten_ze, centroids, p=2)  # Shape: (N, num_clusters)
         #cluster_assignments = torch.argmin(distances, dim=1)  # Shape: (N,)

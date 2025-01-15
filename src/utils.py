@@ -29,7 +29,7 @@ import scipy
 # Constants
 R2D = 180 / np.pi
 D2R = 1 / R2D
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 
 

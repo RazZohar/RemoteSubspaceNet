@@ -178,7 +178,7 @@ class SubspaceMethod(object):
         elif mode.startswith("SubspaceNet"):
             return subspacnet_covariance(X, model)
         elif mode.startswith("sample"):
-            return np.cov(X)
+            return torch.cov(X)
         else:
             raise Exception(
                 (
@@ -582,6 +582,8 @@ class Esprit(RootMUSIC):
         phi = torch.Tensor(phi).to(device)
         # Find eigenvalues and eigenvectors (EVD) of Phi
         phi_eigenvalues, _ = torch.linalg.eig(phi)
+
+        phi_eigenvalues = phi_eigenvalues.cpu().detach().numpy()
         # Calculate DoA out of the eigenvalues of Phi
         doa_predictions = -1 * self.extract_predictions_from_roots(phi_eigenvalues)[0]
         return doa_predictions, M

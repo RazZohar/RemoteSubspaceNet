@@ -79,6 +79,21 @@ class SystemModelParams:
 
         return self
 
+    def export_to_json(self):
+        """
+        This function exports the SystemModelParams object to a json object.
+        Args:
+            self - the system model parameters object.
+        Returns:
+            None
+        """
+        # Serializing json
+        system_model_json = dict()
+        system_model_json["system_model"] = self.__dict__
+        json_object = json.dumps(system_model_json, indent=4)
+
+        return json_object
+
 
 class SystemModel(object):
     def __init__(self, system_model_params: SystemModelParams):

@@ -199,6 +199,8 @@ def evaluate_augmented_model(
                 predictions, M = method_output[0], method_output[-1]
                 # If the amount of predictions is less than the amount of sources
                 predictions = add_random_predictions(M, predictions, algorithm)
+
+                DOA = DOA.cpu().detach().numpy()
                 # Calculate loss criterion
                 loss = criterion(predictions, DOA * R2D)
                 hybrid_loss.append(loss)
@@ -263,6 +265,9 @@ def evaluate_model_based(
     for i, data in enumerate(dataset):
         X, doa = data
         X = X[0]
+
+        doa = doa.cpu().detach().numpy()
+
         # Root-MUSIC algorithms
         if "r-music" in algorithm:
             root_music = RootMUSIC(system_model)
@@ -331,6 +336,8 @@ def evaluate_model_based(
                 predictions, M = esprit.narrowband(X=X, mode="sample")
             # If the amount of predictions is less than the amount of sources
             predictions = add_random_predictions(M, predictions, algorithm)
+
+
             # Calculate loss criterion
             loss = criterion(predictions, doa * R2D)
             loss_list.append(loss)

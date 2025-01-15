@@ -127,9 +127,9 @@ if __name__ == "__main__":
         "LOAD_DATA": True,  # Loading data from exist dataset
         "LOAD_MODEL": True,  # Load specific model for training
         "TRAIN_MODEL": False,  # Applying training operation
-        "SAVE_MODEL": True,  # Saving tuned model
+        "SAVE_MODEL": False,  # Saving tuned model
         "EVALUATE_MODE": True,  # Evaluating desired algorithms
-        "CREATE_CODEBOOK" : False, # Create the codebook for VQ-VAE
+        "CREATE_CODEBOOK" : True, # Create the codebook for VQ-VAE
         "TRAIN_QUANTIZED" : False, # Train the model for the quantization
     }
 
@@ -156,7 +156,7 @@ if __name__ == "__main__":
         .set_parameter("sv_noise_var", 0)
         .set_parameter("codebook_size", CODEBOOK_SIZE)
     )
-    print(f'Set model configuration')
+
     # Generate model configuration
     MAXIMAL_TAU = 8
     model_config = (
@@ -167,6 +167,9 @@ if __name__ == "__main__":
         .set_model(system_model_params)
     )
     print('Generating model configuration')
+
+
+
     # Define samples size
     samples_size = 100000  # Overall dateset size
     train_test_ratio = 0.05  # training and testing datasets ratio
@@ -174,6 +177,11 @@ if __name__ == "__main__":
     simulation_filename = get_simulation_filename(
         system_model_params=system_model_params, model_config=model_config
     )
+    print(f'Set model configuration and export to configuration/{simulation_filename}')
+    system_model_json = system_model_params.export_to_json()
+    with open(f'configuration/{simulation_filename}.json', "w") as outfile:
+        outfile.write(system_model_json)
+
     # Print new simulation intro
     print("------------------------------------")
     print("---------- New Simulation ----------")
@@ -281,7 +289,7 @@ if __name__ == "__main__":
         #evaluate_model_command()
 
     if commands["CREATE_CODEBOOK"]:
-        CODEBOOK_SIZE = 128
+
         CLUSTERS_COUNT = CODEBOOK_SIZE
 
         #codebook_creation_subdataset, _ = codebook_creation.get_n_batches(codebook_creation_dataset, num_batches=25)
@@ -289,15 +297,13 @@ if __name__ == "__main__":
         codebook_creation_subset = torch.utils.data.Subset(train_dataset, torch.arange(samples_size, dtype=torch.int64))
 
         codebook_creation_dataset = torch.utils.data.DataLoader(
-            codebook_creation_subset, batch_size=1024, shuffle=True, drop_last=False
+            train_dataset, batch_size=1024, shuffle=False, drop_last=False
         )
 
 
         # Load a pretrained model
         criterion, subspace_criterion = set_criterions("rmse")
 
-        # Load the VQ_VAE model
-        simulation_filename = simulation_filename + f'_VQVAE'
 
         simulation_parameters = (
             TrainingParams()
@@ -309,8 +315,10 @@ if __name__ == "__main__":
             )
         )
         model = simulation_parameters.model
+        # Load the VQ_VAE model
+        simulation_filename = simulation_filename + f'_VQVAE'
 
-
+        CODEBOOK_SIZE = 256
         codebook = codebook_creation.create_codebook_command(model.encoder, codebook_creation_dataset, cb_vec_dim=4, num_clusters=CODEBOOK_SIZE)
         base_simulation_name = get_simulation_filename(
         system_model_params=system_model_params, model_config=model_config
@@ -402,7 +410,7 @@ if __name__ == "__main__":
         #evaluate_model_command()
 
     if commands["TRAIN_QUANTIZED"]:
-        CODEBOOK_SIZE = 128
+        CODEBOOK_SIZE = 256
         CLUSTERS_COUNT = CODEBOOK_SIZE
 
         base_simulation_name = get_simulation_filename(
