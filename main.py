@@ -125,11 +125,11 @@ if __name__ == "__main__":
         "SAVE_TO_FILE": False,  # Saving results to file or present them over CMD
         "CREATE_DATA": False,  # Creating new dataset
         "LOAD_DATA": True,  # Loading data from exist dataset
-        "LOAD_MODEL": True,  # Load specific model for training
-        "TRAIN_MODEL": False,  # Applying training operation
-        "SAVE_MODEL": False,  # Saving tuned model
+        "LOAD_MODEL": False,  # Load specific model for training
+        "TRAIN_MODEL": True,  # Applying training operation
+        "SAVE_MODEL": True,  # Saving tuned model
         "EVALUATE_MODE": True,  # Evaluating desired algorithms
-        "CREATE_CODEBOOK" : True, # Create the codebook for VQ-VAE
+        "CREATE_CODEBOOK" : False, # Create the codebook for VQ-VAE
         "TRAIN_QUANTIZED" : False, # Train the model for the quantization
     }
 
@@ -146,7 +146,7 @@ if __name__ == "__main__":
     system_model_params = (
         SystemModelParams()
         .set_parameter("N", 8)
-        .set_parameter("M", 3)
+        .set_parameter("M", 5)
         .set_parameter("T", 50)
         .set_parameter("snr", 10)
         .set_parameter("signal_type", "NarrowBand")
@@ -291,11 +291,6 @@ if __name__ == "__main__":
     if commands["CREATE_CODEBOOK"]:
 
         CLUSTERS_COUNT = CODEBOOK_SIZE
-
-        #codebook_creation_subdataset, _ = codebook_creation.get_n_batches(codebook_creation_dataset, num_batches=25)
-
-        codebook_creation_subset = torch.utils.data.Subset(train_dataset, torch.arange(samples_size, dtype=torch.int64))
-
         codebook_creation_dataset = torch.utils.data.DataLoader(
             train_dataset, batch_size=1024, shuffle=False, drop_last=False
         )

@@ -687,7 +687,7 @@ class DeepAugmentedMUSIC(nn.Module):
         for iter in range(self.batch_size):
             R = bs_Rz[iter]
             # Extract eigenvalues and eigenvectors using EVD
-            _, eigenvectors = torch.linalg.eig(R)
+            _, eigenvectors = torch.linalg.eigh(R)
             # Noise subspace as the eigenvectors which associated with the M first eigenvalues
             Un = eigenvectors[:, self.M :]
             # Calculate MUSIC spectrum
@@ -835,7 +835,7 @@ def root_music(Rz: torch.Tensor, M: int, batch_size: int):
     for iter in range(batch_size):
         R = Bs_Rz[iter]
         # Extract eigenvalues and eigenvectors using EVD
-        eigenvalues, eigenvectors = torch.linalg.eig(R)
+        eigenvalues, eigenvectors = torch.linalg.eigh(R)
         # Assign noise subspace as the eigenvectors associated with M greatest eigenvalues
         Un = eigenvectors[:, torch.argsort(torch.abs(eigenvalues)).flip(0)][:, M:]
         # Generate hermitian noise subspace matrix
@@ -892,7 +892,7 @@ def esprit(Rz: torch.Tensor, M: int, batch_size: int):
     for iter in range(batch_size):
         R = Bs_Rz[iter]
         # Extract eigenvalues and eigenvectors using EVD
-        eigenvalues, eigenvectors = torch.linalg.eig(R)
+        eigenvalues, eigenvectors = torch.linalg.eigh(R)
 
         # Get signal subspace
         Us = eigenvectors[:, torch.argsort(torch.abs(eigenvalues)).flip(0)][:, :M]
@@ -904,7 +904,7 @@ def esprit(Rz: torch.Tensor, M: int, batch_size: int):
         # Generate Phi matrix
         phi = torch.linalg.pinv(Us_upper) @ Us_lower
         # Find eigenvalues and eigenvectors (EVD) of Phi
-        phi_eigenvalues, _ = torch.linalg.eig(phi)
+        phi_eigenvalues, _ = torch.linalg.eigh(phi)
         # Calculate the phase component of the roots
         eigenvalues_angels = torch.angle(phi_eigenvalues)
         # Calculate the DoA out of the phase component

@@ -84,7 +84,8 @@ def create_codebook_command(encoder : nn.Sequential, input_dataset, cb_vec_dim, 
     #kmeans.fit(flatten_ze.cpu().numpy())
     #flatten_ze = torch.cat(flatten_ze_sub, dim=0)
     #codebook_vectors = torch.Tensor(kmeans.cluster_centers_)
-    codebook_vectors = get_codebook_vectors(flatten_ze, num_clusters, num_iters=50)
+    #codebook_vectors = get_codebook_vectors(flatten_ze, num_clusters, num_iters=50)
+    codebook_vectors = get_codebook_vectors_low_profile(flatten_ze, num_clusters, num_iters=50)
     
     #add_figure_encoder(z_e, kmeans.cluster_centers_)
     return codebook_vectors
@@ -153,7 +154,7 @@ def get_codebook_vectors(flatten_ze, num_clusters, num_iters):
         """
         Calculate the batch distance and then select centeriod globally
         """
-        cluster_assignments = batch_cdist_and_argmin(flatten_ze, centroids, cluster_assignments_temp, batch_size=512)
+        cluster_assignments = batch_cdist_and_argmin(flatten_ze, centroids, cluster_assignments_temp, batch_size=1024)
         # Compute distances and assign each point to the nearest centroid
         #distances = torch.cdist(flatten_ze, centroids, p=2)  # Shape: (N, num_clusters)
         #cluster_assignments = torch.argmin(distances, dim=1)  # Shape: (N,)
@@ -171,6 +172,59 @@ def get_codebook_vectors(flatten_ze, num_clusters, num_iters):
         centroids = new_centroids
 
     return centroids
+
+def get_codebook_vectors_low_profile(flatten_ze, num_clusters, num_iters):
+    """
+    Perform k-means clustering using PyTorch on GPU.
+
+    Args:
+        flatten_ze (torch.Tensor): Data to cluster, shape (N, D). Should be on GPU.
+        num_clusters (int): Number of clusters.
+        num_iters (int): Number of k-means iterations.
+
+    Returns:
+        torch.Tensor: Codebook vectors (cluster centers), shape (num_clusters, D).
+    """
+    #assert flatten_ze.is_cuda, "Input data must be on GPU"
+    assert flatten_ze.ndim == 2, "Input tensor must be 2D (N, D)"
+
+    device = flatten_ze.device
+    N, D = flatten_ze.shape
+
+    # Randomly initialize cluster centers
+    indices = torch.randperm(N)[:num_clusters]
+    centroids = flatten_ze[indices]  # Initial cluster centers, shape (num_clusters, D)
+
+    # Initialize tensor for cluster assignments
+    cluster_assignments_temp = torch.empty(N, dtype=torch.long, device=device)
+    unit_cluster_assignments = torch.ones(N, dtype=torch.float, device=device)
+    for index in range(num_iters):
+        """
+        Calculate the batch distance and then select centroid globally
+        """
+        cluster_assignments = batch_cdist_and_argmin(flatten_ze, centroids, cluster_assignments_temp, batch_size=1024)
+
+        print(f'Calculate Centroids for LBG iteration {index + 1} / {num_iters}')
+
+        # Initialize centroid sums and counts
+        new_centroids = torch.zeros_like(centroids)
+        counts = torch.zeros(num_clusters, device=flatten_ze.device)
+
+        # Incrementally calculate the mean for each cluster
+        new_centroids.scatter_add_(0, cluster_assignments.unsqueeze(1).expand(-1, flatten_ze.size(1)), flatten_ze)
+        counts.scatter_add_(0, cluster_assignments, unit_cluster_assignments)
+
+        # Finalize the new centroids by dividing by counts
+        valid_clusters = counts > 0
+        new_centroids[valid_clusters] /= counts[valid_clusters].unsqueeze(1)
+
+        # Check for convergence
+        if torch.allclose(centroids, new_centroids, atol=1e-4):
+            break
+        centroids = new_centroids
+
+    return centroids
+
 
 def init_weights_lbg(module, codebook):
     weight_tensor = torch.Tensor(codebook)
