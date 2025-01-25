@@ -575,8 +575,20 @@ class SubspaceNetEsprit(SubspaceNet):
         # Apply The encoder from the AE architecture
         x = self.encoder(Rx_tau)
 
+        # Quantize
+        x_normalized = x - x.mean()
+
+        # quantize if needed
+        if self.quantize:
+            z_quantized, vq_loss = self.quantizer(x_normalized)
+
+            self.__unique_indices_set.update(torch.unique(z_quantized).tolist())
+            self.codebook_utilization = len(self.__unique_indices_set) / self.codebook_size
+        else:
+            z_quantized, vq_loss = x_normalized, 0
+
         # Apply the decoder from the AE architecture
-        Rx = self.decoder(x)
+        Rx = self.decoder(z_quantized)
 
         # Reshape Output shape: [Batch size, 2N, N]
         Rx_View = Rx.view(Rx.size(0), Rx.size(2), Rx.size(3))
@@ -590,7 +602,7 @@ class SubspaceNetEsprit(SubspaceNet):
         )  # Shape: [Batch size, N, N]
         # Feed surrogate covariance to Esprit algorithm
         doa_prediction = esprit(Rz, self.M, self.batch_size)
-        return doa_prediction, Rz
+        return doa_prediction, Rz, vq_loss
 
 
 class DeepAugmentedMUSIC(nn.Module):

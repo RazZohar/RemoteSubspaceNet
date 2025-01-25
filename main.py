@@ -37,6 +37,11 @@ from src.models import ModelGenerator
 
 import src.create_codebook as codebook_creation
 
+
+import torch.autograd.profiler as profiler
+from torch.profiler import profile, record_function, ProfilerActivity
+
+
 # Initialization
 warnings.simplefilter("ignore")
 os.system("cls||clear")
@@ -125,11 +130,11 @@ if __name__ == "__main__":
         "SAVE_TO_FILE": False,  # Saving results to file or present them over CMD
         "CREATE_DATA": False,  # Creating new dataset
         "LOAD_DATA": True,  # Loading data from exist dataset
-        "LOAD_MODEL": False,  # Load specific model for training
-        "TRAIN_MODEL": True,  # Applying training operation
+        "LOAD_MODEL": True,  # Load specific model for training
+        "TRAIN_MODEL": False,  # Applying training operation
         "SAVE_MODEL": True,  # Saving tuned model
         "EVALUATE_MODE": True,  # Evaluating desired algorithms
-        "CREATE_CODEBOOK" : False, # Create the codebook for VQ-VAE
+        "CREATE_CODEBOOK" : True, # Create the codebook for VQ-VAE
         "TRAIN_QUANTIZED" : False, # Train the model for the quantization
     }
 
@@ -147,7 +152,7 @@ if __name__ == "__main__":
         SystemModelParams()
         .set_parameter("N", 8)
         .set_parameter("M", 5)
-        .set_parameter("T", 50)
+        .set_parameter("T", 100)
         .set_parameter("snr", 10)
         .set_parameter("signal_type", "NarrowBand")
         .set_parameter("signal_nature", "coherent")
@@ -162,7 +167,7 @@ if __name__ == "__main__":
     model_config = (
         ModelGenerator()
         .set_model_type("SubspaceNet")
-        .set_diff_method("root_music")
+        .set_diff_method("esprit")
         .set_tau(min(MAXIMAL_TAU, system_model_params.T - 1))
         .set_model(system_model_params)
     )
@@ -241,13 +246,17 @@ if __name__ == "__main__":
         simulation_parameters = (
             TrainingParams()
             .set_batch_size(1024)
-            .set_epochs(40)
+            .set_epochs(80)
             .set_model(model=model_config)
             .set_optimizer(optimizer="Adam", learning_rate=0.001, weight_decay=1e-5)
             .set_training_dataset(train_dataset)
-            .set_schedular(step_size=20, gamma=0.2)
+            .set_schedular(step_size=40, gamma=0.2)
             .set_criterion()
         )
+
+        #Update to handle root music with cohernt sources
+        #scheduler = CosineAnnealingLR(optimizer, T_max=100, eta_min=0.00001)
+
         if commands["LOAD_MODEL"]:
             simulation_parameters.load_model(
                 loading_path=saving_path / "final_models" / simulation_filename
@@ -261,11 +270,17 @@ if __name__ == "__main__":
         )
 
         # Perform simulation training and evaluation stages
+#        with profile(activities=[ProfilerActivity.CPU]) as prof:
+#            with record_function("model_inference"):
         model, loss_train_list, loss_valid_list = train(
             training_parameters=simulation_parameters,
             model_name=simulation_filename,
             saving_path=saving_path,
         )
+
+
+        #print(prof.key_averages(group_by_stack_n=5).table(sort_by='self_cpu_time_total', row_limit=5))
+
         # Save model weights
         if commands["SAVE_MODEL"]:
 

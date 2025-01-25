@@ -118,19 +118,22 @@ def evaluate_dnn_model(
         overall_loss = overall_loss / test_length
     # Plot spectrum for SubspaceNet model
     if plot_spec and model_type.startswith("SubspaceNet"):
-        DOA_all = model_output[1]
-        roots = model_output[2]
 
-        DOA_all = model_output[1].cpu().detach().numpy()
-        roots = model_output[2].cpu().detach().numpy()
-        DOA = DOA.cpu().detach().numpy()
-        plot_spectrum(
-            predictions=DOA_all * R2D,
-            true_DOA=DOA[0] * R2D,
-            roots=roots,
-            algorithm="SubNet+R-MUSIC",
-            figures=figures,
-        )
+        if model.diff_method == 'root_music':
+            DOA_all = model_output[1]
+            roots = model_output[2]
+
+            DOA_all = model_output[1].cpu().detach().numpy()
+            roots = model_output[2].cpu().detach().numpy()
+            DOA = DOA.cpu().detach().numpy()
+            plot_spectrum(
+                predictions=DOA_all * R2D,
+                true_DOA=DOA[0] * R2D,
+                roots=roots,
+                algorithm="SubNet+R-MUSIC",
+                figures=figures,
+            )
+
     return overall_loss
 
 
