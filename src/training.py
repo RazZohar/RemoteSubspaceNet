@@ -206,16 +206,18 @@ class TrainingParams(object):
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
         # Assign optimizer for training
-        if optimizer.startswith("Adam"):
+        if optimizer == "Adam":
             self.optimizer = optim.Adam(
                 self.model.parameters(), lr=learning_rate, weight_decay=weight_decay
             )
-        elif optimizer.startswith("SGD"):
+        elif optimizer == "SGD":
             self.optimizer = optim.SGD(self.model.parameters(), lr=learning_rate)
         elif optimizer == "SGD Momentum":
             self.optimizer = optim.SGD(
                 self.model.parameters(), lr=learning_rate, momentum=0.9
             )
+        elif optimizer == "AdamW":
+            self.optimizer = optim.AdamW(self.model.parameters(), lr=learning_rate, weight_decay=weight_decay)
         else:
             raise Exception(
                 f"TrainingParams.set_optimizer: Optimizer {optimizer} is not defined"

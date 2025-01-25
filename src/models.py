@@ -396,11 +396,16 @@ class SubspaceNet(nn.Module):
         self.conv2 = nn.Conv2d(32, 32, kernel_size=2)
         self.conv3 = nn.Conv2d(64, 64, kernel_size=2)
 
+        self.batchnorm1 = nn.BatchNorm2d(16)
+        self.batchnorm2 = nn.BatchNorm2d(32)
+
         self.anti_rectifier_layer = AntiRectifierLayer(self.anti_rectifier)
 
         self.encoder = nn.Sequential(self.conv1,
+                                     #self.batchnorm1,
                                      self.anti_rectifier_layer,
                                      self.conv2,
+                                     #self.batchnorm2,
                                      self.anti_rectifier_layer,
                                      self.conv3,
                                      self.anti_rectifier_layer)
@@ -414,7 +419,7 @@ class SubspaceNet(nn.Module):
         self.deconv2 = nn.ConvTranspose2d(128, 32, kernel_size=2)
         self.deconv3 = nn.ConvTranspose2d(64, 16, kernel_size=2)
         self.deconv4 = nn.ConvTranspose2d(32, 1, kernel_size=2)
-        self.DropOut = nn.Dropout(0.25)
+        self.DropOut = nn.Dropout(0.2)
         self.ReLU = nn.ReLU()
 
         # Define The decoder of the AE architecture
@@ -687,7 +692,7 @@ class DeepAugmentedMUSIC(nn.Module):
         for iter in range(self.batch_size):
             R = bs_Rz[iter]
             # Extract eigenvalues and eigenvectors using EVD
-            _, eigenvectors = torch.linalg.eigh(R)
+            _, eigenvectors = torch.linalg.eig(R)
             # Noise subspace as the eigenvectors which associated with the M first eigenvalues
             Un = eigenvectors[:, self.M :]
             # Calculate MUSIC spectrum
@@ -835,7 +840,7 @@ def root_music(Rz: torch.Tensor, M: int, batch_size: int):
     for iter in range(batch_size):
         R = Bs_Rz[iter]
         # Extract eigenvalues and eigenvectors using EVD
-        eigenvalues, eigenvectors = torch.linalg.eigh(R)
+        eigenvalues, eigenvectors = torch.linalg.eig(R)
         # Assign noise subspace as the eigenvectors associated with M greatest eigenvalues
         Un = eigenvectors[:, torch.argsort(torch.abs(eigenvalues)).flip(0)][:, M:]
         # Generate hermitian noise subspace matrix
@@ -892,7 +897,7 @@ def esprit(Rz: torch.Tensor, M: int, batch_size: int):
     for iter in range(batch_size):
         R = Bs_Rz[iter]
         # Extract eigenvalues and eigenvectors using EVD
-        eigenvalues, eigenvectors = torch.linalg.eigh(R)
+        eigenvalues, eigenvectors = torch.linalg.eig(R)
 
         # Get signal subspace
         Us = eigenvectors[:, torch.argsort(torch.abs(eigenvalues)).flip(0)][:, :M]
@@ -904,7 +909,7 @@ def esprit(Rz: torch.Tensor, M: int, batch_size: int):
         # Generate Phi matrix
         phi = torch.linalg.pinv(Us_upper) @ Us_lower
         # Find eigenvalues and eigenvectors (EVD) of Phi
-        phi_eigenvalues, _ = torch.linalg.eigh(phi)
+        phi_eigenvalues, _ = torch.linalg.eig(phi)
         # Calculate the phase component of the roots
         eigenvalues_angels = torch.angle(phi_eigenvalues)
         # Calculate the DoA out of the phase component

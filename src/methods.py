@@ -200,9 +200,9 @@ class SubspaceMethod(object):
             signal_subspace (np.ndarray): Signal subspace.
         """
         # Find eigenvalues and eigenvectors (EVD)
-        eigenvalues, eigenvectors = torch.linalg.eigh(covariance_mat)
-        eigenvalues = eigenvalues.detach().cpu().numpy().copy()
-        eigenvectors = eigenvectors.detach().cpu().numpy().copy()
+        eigenvalues, eigenvectors = torch.linalg.eig(covariance_mat)
+        eigenvalues = eigenvalues.detach().cpu().numpy()
+        eigenvectors = eigenvectors.detach().cpu().numpy()
         # Sort eigenvectors based on eigenvalues order
         eigenvectors = eigenvectors[:, np.argsort(eigenvalues)[::-1]]
         # Assign signal subspace as the eigenvectors associated with M greatest eigenvalues
@@ -581,7 +581,7 @@ class Esprit(RootMUSIC):
         phi = np.linalg.pinv(Us_upper) @ Us_lower
         phi = torch.Tensor(phi).to(device)
         # Find eigenvalues and eigenvectors (EVD) of Phi
-        phi_eigenvalues, _ = torch.linalg.eigh(phi)
+        phi_eigenvalues, _ = torch.linalg.eig(phi)
 
         phi_eigenvalues = phi_eigenvalues.cpu().detach().numpy()
         # Calculate DoA out of the eigenvalues of Phi
