@@ -260,6 +260,49 @@ class DeepRootMUSIC(nn.Module):
         )
         return doa_prediction, doa_all_predictions, roots, Rz
 
+
+def batch_rotation_transform(e, q, epsilon=1e-6):
+    """
+    Computes the Householder-based rotation transformation per batch for multi-dimensional tensors.
+
+    Args:
+    - e: Tensor of shape (B, 128, 13, 5) where B is batch size, 128 is feature dim.
+    - q: Tensor of shape (B, 128, 13, 5).
+    - epsilon: Small value to prevent division by zero.
+
+    Returns:
+    - q_tilde: Rotated version of e, aligned with q, shape (B, 128, 13, 5).
+    """
+    # Compute norms along the feature dimension (dim=1), keeping spatial dimensions
+    e_norm = torch.norm(e, dim=1, keepdim=True) + epsilon  # Shape: (B, 1, 13, 5)
+    q_norm = torch.norm(q, dim=1, keepdim=True) + epsilon  # Shape: (B, 1, 13, 5)
+
+    # Normalize e and q along feature dimension
+    e_hat = e / e_norm  # Shape: (B, 128, 13, 5)
+    q_hat = q / q_norm  # Shape: (B, 128, 13, 5)
+
+    # Compute lambda (scaling factor) per spatial location
+    lambd = q_norm / e_norm  # Shape: (B, 1, 13, 5)
+
+    # Compute Householder vector r per spatial location
+    r = e_hat + q_hat  # Shape: (B, 128, 13, 5)
+    r_norm = torch.norm(r, dim=1, keepdim=True) + epsilon  # Avoid zero division
+    r = r / r_norm  # Normalize r, Shape: (B, 128, 13, 5)
+
+    # Compute transformation: q_tilde = λ * (I - 2rr^T + 2 q̂ ê^T) e
+    # First term: (I - 2rr^T)e (computed per spatial position)
+    rrT_e = torch.sum(r * e, dim=1, keepdim=True) * r
+    first_term = e - 2 * rrT_e
+
+    # Second term: 2 q̂ ê^T e (computed per spatial position)
+    qhat_etrans_e = torch.sum(q_hat * e, dim=1, keepdim=True) * q_hat
+    second_term = 2 * qhat_etrans_e
+
+    # Final transformation
+    q_tilde = lambd * (first_term + second_term)  # Shape: (B, 128, 13, 5)
+
+    return q_tilde
+
 class FixedVectorQuantizer(nn.Module):
     def __init__(self, num_embeddings, codebook_size, lambda_c=0.1, lambda_p=0.33):
         super(FixedVectorQuantizer, self).__init__()
@@ -278,6 +321,13 @@ class FixedVectorQuantizer(nn.Module):
         # Track codebook usage
         self.register_buffer("codebook_usage", torch.zeros(codebook_size))
         self.general_codebook_usage = 0
+
+    @staticmethod
+    def get_very_efficient_rotation(u, q, e):
+        w = ((u + q) / torch.norm(u + q, dim=1, keepdim=True)).detach()
+        e = e - 2 * torch.bmm(torch.bmm(e, w.unsqueeze(-1)), w.unsqueeze(1)) + 2 * torch.bmm(
+            torch.bmm(e, u.unsqueeze(-1).detach()), q.unsqueeze(1).detach())
+        return e
 
     def forward(self, inputs):
         input_shape = inputs.shape
@@ -313,9 +363,36 @@ class FixedVectorQuantizer(nn.Module):
             cb_loss = q_latent_loss + self.lambda_c * e_latent_loss  # Codebook loss
 
             # Gradient copying for the straight-through estimator
-            quantized = inputs + (quantized - inputs).detach()
+            #quantized = inputs + (quantized - inputs).detach()
         else:
             cb_loss = 0
+
+        # Gradient copying for the straight-through estimator
+        # quantized = inputs + (quantized - inputs).detach()
+        # Do the rotation trick from  RESTRUCTURING VECTOR QUANTIZATION WITH THE
+        # ROTATION TRICK
+        # https://arxiv.org/pdf/2410.06424
+        quantized = batch_rotation_transform(e=inputs, q=quantized, epsilon=1e-6)
+        """
+        pre_norm_q = self.get_very_efficient_rotation(inputs / (torch.norm(inputs, dim=1, keepdim=True) + 1e-6),
+                                                      quantized / (torch.norm(quantized, dim=1,
+                                                                              keepdim=True) + 1e-6),
+                                                      inputs).squeeze()
+        quantized = pre_norm_q * (
+                torch.norm(quantized, dim=1, keepdim=True) / (
+                torch.norm(inputs, dim=1, keepdim=True) + 1e-6)).detach()
+
+        
+                # Do the rotation trick from  RESTRUCTURING VECTOR QUANTIZATION WITH THE
+                # ROTATION TRICK
+                # https://arxiv.org/pdf/2410.06424
+                pre_norm_q = self.get_very_efficient_rotation(inputs / (torch.norm(inputs, dim=1, keepdim=True) + 1e-6),
+                                                              quantized / (torch.norm(quantized, dim=1, keepdim=True) + 1e-6),
+                                                              inputs.unsqueeze(1)).squeeze()
+                quantized = pre_norm_q * (
+                        torch.norm(quantized, dim=1, keepdim=True) / (torch.norm(inputs, dim=1, keepdim=True) + 1e-6)).detach()
+        """
+
 
         return quantized, cb_loss
 
