@@ -135,7 +135,7 @@ if __name__ == "__main__":
         "SAVE_MODEL": True,  # Saving tuned model
         "EVALUATE_MODE": True,  # Evaluating desired algorithms
         "CREATE_CODEBOOK" : True, # Create the codebook for VQ-VAE
-        "TRAIN_QUANTIZED" : False, # Train the model for the quantization
+        "TRAIN_QUANTIZED" : True, # Train the model for the quantization
     }
 
     CODEBOOK_SIZE = 4
@@ -520,6 +520,9 @@ if __name__ == "__main__":
 
     # Evaluation stage
     if commands["EVALUATE_MODE"]:
+
+
+
         # Initialize figures dict for plotting
         figures = initialize_figures()
         # Define loss measure for evaluation

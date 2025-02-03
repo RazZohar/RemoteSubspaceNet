@@ -322,15 +322,56 @@ class FixedVectorQuantizer(nn.Module):
         self.register_buffer("codebook_usage", torch.zeros(codebook_size))
         self.general_codebook_usage = 0
 
+
+
     @staticmethod
     def get_very_efficient_rotation(u, q, e):
         w = ((u + q) / torch.norm(u + q, dim=1, keepdim=True)).detach()
-        e = e - 2 * torch.bmm(torch.bmm(e, w.unsqueeze(-1)), w.unsqueeze(1)) + 2 * torch.bmm(
-            torch.bmm(e, u.unsqueeze(-1).detach()), q.unsqueeze(1).detach())
-        return e
+        # Ensure e is (N, 1, C)
+        if e.dim() == 2:
+            e = e.unsqueeze(1)  # Convert (N, C) → (N, 1, C)
+
+        # Ensure u and q are (N, C, 1) for correct bmm usage
+        u = u.unsqueeze(-1).detach()  # (N, C, 1)
+        q = q.unsqueeze(1).detach()  # (N, 1, C)
+        w = w.unsqueeze(-1)  # (N, C, 1)
+
+        # First reflection term
+        e = e - 2 * torch.bmm(torch.bmm(e, w), w.transpose(1, 2))
+
+        # Second rotation term
+        e = e + 2 * torch.bmm(torch.bmm(e, u), q)
+
+        return e.squeeze(1)  # Convert back to (N, C) if necessary
+
+
+    def apply_rotation_trick(self, inputs, quantized):
+        """
+        Notes: The rotation trick is implmented here but for my setup the results are worsen
+        # Do the rotation trick from  RESTRUCTURING VECTOR QUANTIZATION WITH THE
+        # ROTATION TRICK
+        # https://arxiv.org/pdf/2410.06424
+        """
+        inputs = inputs.permute(0, 2, 3, 1).contiguous()
+        b, c, h, w = inputs.shape
+        inputs = inputs.permute(0, 2, 3, 1).reshape(-1, c)  # (b, h, w, c) -> (b*h*w, c)
+        quantized = quantized.permute(0, 2, 3, 1).reshape(-1, c)  # (b, h, w, c) -> (b*h*w, c)
+
+        pre_norm_q = self.get_very_efficient_rotation(inputs / (torch.norm(inputs, dim=1, keepdim=True) + 1e-6),
+                                                     quantized / (torch.norm(quantized, dim=1, keepdim=True) + 1e-6),
+                                                     inputs.unsqueeze(1)).squeeze()
+        quantized = pre_norm_q * (
+               torch.norm(quantized, dim=1, keepdim=True) / (torch.norm(inputs, dim=1, keepdim=True) + 1e-6)).detach()
+
+
+        quantized = quantized.view(b, h, w, c).permute(0, 2, 3, 1)
+        return quantized
+
+
 
     def forward(self, inputs):
         input_shape = inputs.shape
+        #inputs = inputs.permute(0, 2, 3, 1).contiguous()
 
         # Flatten input
         flat_input = inputs.view(-1, self.d)
@@ -363,35 +404,9 @@ class FixedVectorQuantizer(nn.Module):
             cb_loss = q_latent_loss + self.lambda_c * e_latent_loss  # Codebook loss
 
             # Gradient copying for the straight-through estimator
-            #quantized = inputs + (quantized - inputs).detach()
+            quantized = inputs + (quantized - inputs).detach()
         else:
             cb_loss = 0
-
-        # Gradient copying for the straight-through estimator
-        # quantized = inputs + (quantized - inputs).detach()
-        # Do the rotation trick from  RESTRUCTURING VECTOR QUANTIZATION WITH THE
-        # ROTATION TRICK
-        # https://arxiv.org/pdf/2410.06424
-        quantized = batch_rotation_transform(e=inputs, q=quantized, epsilon=1e-6)
-        """
-        pre_norm_q = self.get_very_efficient_rotation(inputs / (torch.norm(inputs, dim=1, keepdim=True) + 1e-6),
-                                                      quantized / (torch.norm(quantized, dim=1,
-                                                                              keepdim=True) + 1e-6),
-                                                      inputs).squeeze()
-        quantized = pre_norm_q * (
-                torch.norm(quantized, dim=1, keepdim=True) / (
-                torch.norm(inputs, dim=1, keepdim=True) + 1e-6)).detach()
-
-        
-                # Do the rotation trick from  RESTRUCTURING VECTOR QUANTIZATION WITH THE
-                # ROTATION TRICK
-                # https://arxiv.org/pdf/2410.06424
-                pre_norm_q = self.get_very_efficient_rotation(inputs / (torch.norm(inputs, dim=1, keepdim=True) + 1e-6),
-                                                              quantized / (torch.norm(quantized, dim=1, keepdim=True) + 1e-6),
-                                                              inputs.unsqueeze(1)).squeeze()
-                quantized = pre_norm_q * (
-                        torch.norm(quantized, dim=1, keepdim=True) / (torch.norm(inputs, dim=1, keepdim=True) + 1e-6)).detach()
-        """
 
 
         return quantized, cb_loss
