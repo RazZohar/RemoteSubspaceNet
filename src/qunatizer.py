@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
+import matplotlib.pyplot as plt
 
 class FixedVectorQuantizer(nn.Module):
     """
@@ -110,6 +111,91 @@ class FixedVectorQuantizer(nn.Module):
         return self.codebook_usage.cpu().numpy()
 
 
+
+# This is the element wise qunatizer
+class ElementWiseQuantizer(nn.Module):
+    def __init__(self, n_levels=16, min_val=-1.0, max_val=1.0):
+        """
+        Element-wise uniform quantizer for complex numbers.
+        :param n_levels: Number of quantization levels (bins)
+        :param min_val: Minimum value to be quantized (applies to real and imaginary separately)
+        :param max_val: Maximum value to be quantized (applies to real and imaginary separately)
+        """
+        super().__init__()
+        self.n_levels = n_levels
+        self.min_val = min_val
+        self.max_val = max_val
+        self.step_size = (max_val - min_val) / (n_levels - 1)  # Step size
+
+        # Tracking histograms for real and imaginary parts
+        self.register_buffer("quantization_counts_real", torch.zeros(n_levels))
+        self.register_buffer("quantization_counts_imag", torch.zeros(n_levels))
+
+    def quantize(self, x, counts):
+        """
+        Helper function to quantize real or imaginary part separately.
+        :param x: Input tensor (real or imaginary part)
+        :param counts: Tracking tensor for quantization usage
+        :return: Quantized tensor
+        """
+        x_clamped = torch.clamp(x, self.min_val, self.max_val)  # Clip values
+        x_normalized = (x_clamped - self.min_val) / self.step_size  # Normalize to [0, n_levels-1]
+        x_rounded = torch.round(x_normalized)  # Round to nearest quantization bin
+        x_quantized = x_rounded * self.step_size + self.min_val  # Convert back to real value
+
+        # Track histogram of quantized values
+        with torch.no_grad():  # No gradients needed for monitoring
+            indices = x_rounded.long().flatten()  # Convert to integer indices
+            valid_mask = (indices >= 0) & (indices < self.n_levels)  # Ensure valid indices
+            counts.scatter_add_(0, indices[valid_mask], torch.ones_like(indices[valid_mask]))
+
+        return x_quantized
+
+    def forward(self, x: torch.Tensor):
+        """
+        Quantizes a complex input tensor element-wise.
+        :param x: Complex tensor of shape (batch, features), where features contain complex values.
+        :return: Quantized complex tensor
+        """
+        real_part = self.quantize(x.real, self.quantization_counts_real)
+        imag_part = self.quantize(x.imag, self.quantization_counts_imag)
+        return torch.complex(real_part, imag_part)  # Reconstruct quantized complex tensor
+
+    def get_usage_distribution(self):
+        """
+        Returns the current distribution of quantization level usage for real and imaginary parts.
+        """
+        real_dist = self.quantization_counts_real / self.quantization_counts_real.sum()
+        imag_dist = self.quantization_counts_imag / self.quantization_counts_imag.sum()
+        return real_dist, imag_dist
+
+    def plot_usage_distribution(self):
+        """
+        Plots the histogram of quantization level usage for both real and imaginary parts.
+        """
+        real_dist, imag_dist = self.get_usage_distribution()
+        levels = torch.linspace(self.min_val, self.max_val, self.n_levels).cpu().numpy()
+
+        plt.figure(figsize=(10, 5))
+
+        # Real Part Usage
+        plt.subplot(1, 2, 1)
+        plt.bar(levels, real_dist.cpu().numpy(), width=self.step_size * 0.8, color="b", alpha=0.7)
+        plt.xlabel("Real Part Quantization Levels")
+        plt.ylabel("Usage Frequency")
+        plt.title("Real Part Quantization Level Usage")
+        plt.grid(axis="y", linestyle="--", alpha=0.6)
+
+        # Imaginary Part Usage
+        plt.subplot(1, 2, 2)
+        plt.bar(levels, imag_dist.cpu().numpy(), width=self.step_size * 0.8, color="r", alpha=0.7)
+        plt.xlabel("Imaginary Part Quantization Levels")
+        plt.ylabel("Usage Frequency")
+        plt.title("Imaginary Part Quantization Level Usage")
+        plt.grid(axis="y", linestyle="--", alpha=0.6)
+
+        plt.tight_layout()
+        plt.show()
 
 
 
