@@ -131,6 +131,15 @@ class ElementWiseQuantizer(nn.Module):
         self.register_buffer("quantization_counts_real", torch.zeros(n_levels))
         self.register_buffer("quantization_counts_imag", torch.zeros(n_levels))
 
+
+    def init_limits(self, x):
+        min_val = torch.min(x)
+        max_val = torch.max(x)
+        self.min_val = min_val
+        self.max_val = max_val
+        self.step_size = (max_val - min_val) / (self.n_levels - 1)  # Step size
+        
+
     def quantize(self, x, counts):
         """
         Helper function to quantize real or imaginary part separately.
@@ -138,17 +147,21 @@ class ElementWiseQuantizer(nn.Module):
         :param counts: Tracking tensor for quantization usage
         :return: Quantized tensor
         """
-        x_clamped = torch.clamp(x, self.min_val, self.max_val)  # Clip values
-        x_normalized = (x_clamped - self.min_val) / self.step_size  # Normalize to [0, n_levels-1]
-        x_rounded = torch.round(x_normalized)  # Round to nearest quantization bin
-        x_quantized = x_rounded * self.step_size + self.min_val  # Convert back to real value
+        # Adaptive Uniform quantization
+        #self.init_limits(x)
+        with torch.no_grad():
+            x_clamped = torch.clamp(x, self.min_val, self.max_val)  # Clip values
+            x_normalized = (x_clamped - self.min_val) / self.step_size  # Normalize to [0, n_levels-1]
+            x_rounded = torch.round(x_normalized)  # Round to nearest quantization bin
+            x_quantized = x_rounded * self.step_size + self.min_val  # Convert back to real value
 
         # Track histogram of quantized values
-        with torch.no_grad():  # No gradients needed for monitoring
+        """with torch.no_grad():  # No gradients needed for monitoring
             indices = x_rounded.long().flatten()  # Convert to integer indices
             valid_mask = (indices >= 0) & (indices < self.n_levels)  # Ensure valid indices
             counts.scatter_add_(0, indices[valid_mask], torch.ones_like(indices[valid_mask]))
-
+        """
+        #print(f'original {x=} when {x_quantized=} diff={x-x_quantized}')
         return x_quantized
 
     def forward(self, x: torch.Tensor):
@@ -158,8 +171,9 @@ class ElementWiseQuantizer(nn.Module):
         :return: Quantized complex tensor
         """
         real_part = self.quantize(x.real, self.quantization_counts_real)
-        imag_part = self.quantize(x.imag, self.quantization_counts_imag)
-        return torch.complex(real_part, imag_part)  # Reconstruct quantized complex tensor
+        #imag_part = self.quantize(x.imag, self.quantization_counts_imag)
+        #return torch.complex(real_part, imag_part), 0  # Reconstruct quantized complex tensor
+        return real_part, 0
 
     def get_usage_distribution(self):
         """

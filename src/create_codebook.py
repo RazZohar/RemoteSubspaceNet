@@ -230,3 +230,23 @@ def init_weights_lbg(module, codebook):
     weight_tensor = torch.Tensor(codebook)
     module.weight = nn.Parameter(weight_tensor)
     return module.weight
+
+
+def get_min_max(encoder : nn.Sequential, input_dataset):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    global_max_ze = float('-inf')
+    global_min_ze = float('inf')
+
+    for data in tqdm(input_dataset):
+        Rx, DOA = data
+
+        # Cast observations and DoA to Variables
+        Rx = Rx.to(device)
+
+        with torch.no_grad():
+            z_e = encoder(Rx)
+
+            global_max_ze = max(global_max_ze, torch.max(z_e))  # Update max
+            global_min_ze = min(global_min_ze, torch.min(z_e))  # Update min
+
+    return global_max_ze, global_min_ze

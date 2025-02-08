@@ -499,8 +499,7 @@ class SubspaceNet(nn.Module):
                                      self.conv2,
                                      #self.batchnorm2,
                                      self.anti_rectifier_layer,
-                                     self.conv3,
-                                     self.anti_rectifier_layer)
+                                     self.conv3)
 
         num_embeddings = 4
         self.codebook_size = codebook_size
@@ -515,7 +514,8 @@ class SubspaceNet(nn.Module):
         self.ReLU = nn.ReLU()
 
         # Define The decoder of the AE architecture
-        self.decoder = nn.Sequential(self.deconv2,
+        self.decoder = nn.Sequential(self.anti_rectifier_layer,
+                                     self.deconv2,
                                      self.anti_rectifier_layer,
                                      self.deconv3,
                                      self.anti_rectifier_layer,
