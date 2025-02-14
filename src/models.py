@@ -50,6 +50,8 @@ from src.utils import gram_diagonal_overload, device
 from src.utils import sum_of_diags_torch, find_roots_torch
 
 from src.qunatizer import FixedVectorQuantizer, AdaptiveVectorQuantizer
+from src.data_handler import create_autocorrelation_tensor
+#from src.task_ignorant_model import SignalsSubspaceNetEsprit
 
 warnings.simplefilter("ignore")
 # Constants
@@ -157,6 +159,8 @@ class ModelGenerator(object):
                 tau=self.tau, M=system_model_params.M, diff_method=self.diff_method,
                 quantize=False, codebook_size=system_model_params.codebook_size
             )
+        elif self.model_type.startswith("SignalsSubspaceNet"):
+            self.model = SignalsSubspaceNetEsprit(N=system_model_params.N, T=system_model_params.T, tau=self.tau, M=system_model_params.M)
         else:
             raise Exception(
                 f"ModelGenerator.set_model: Model type {self.model_type} is not defined"
@@ -259,49 +263,6 @@ class DeepRootMUSIC(nn.Module):
             Rz, self.M, self.batch_size
         )
         return doa_prediction, doa_all_predictions, roots, Rz
-
-
-def batch_rotation_transform(e, q, epsilon=1e-6):
-    """
-    Computes the Householder-based rotation transformation per batch for multi-dimensional tensors.
-
-    Args:
-    - e: Tensor of shape (B, 128, 13, 5) where B is batch size, 128 is feature dim.
-    - q: Tensor of shape (B, 128, 13, 5).
-    - epsilon: Small value to prevent division by zero.
-
-    Returns:
-    - q_tilde: Rotated version of e, aligned with q, shape (B, 128, 13, 5).
-    """
-    # Compute norms along the feature dimension (dim=1), keeping spatial dimensions
-    e_norm = torch.norm(e, dim=1, keepdim=True) + epsilon  # Shape: (B, 1, 13, 5)
-    q_norm = torch.norm(q, dim=1, keepdim=True) + epsilon  # Shape: (B, 1, 13, 5)
-
-    # Normalize e and q along feature dimension
-    e_hat = e / e_norm  # Shape: (B, 128, 13, 5)
-    q_hat = q / q_norm  # Shape: (B, 128, 13, 5)
-
-    # Compute lambda (scaling factor) per spatial location
-    lambd = q_norm / e_norm  # Shape: (B, 1, 13, 5)
-
-    # Compute Householder vector r per spatial location
-    r = e_hat + q_hat  # Shape: (B, 128, 13, 5)
-    r_norm = torch.norm(r, dim=1, keepdim=True) + epsilon  # Avoid zero division
-    r = r / r_norm  # Normalize r, Shape: (B, 128, 13, 5)
-
-    # Compute transformation: q_tilde = λ * (I - 2rr^T + 2 q̂ ê^T) e
-    # First term: (I - 2rr^T)e (computed per spatial position)
-    rrT_e = torch.sum(r * e, dim=1, keepdim=True) * r
-    first_term = e - 2 * rrT_e
-
-    # Second term: 2 q̂ ê^T e (computed per spatial position)
-    qhat_etrans_e = torch.sum(q_hat * e, dim=1, keepdim=True) * q_hat
-    second_term = 2 * qhat_etrans_e
-
-    # Final transformation
-    q_tilde = lambd * (first_term + second_term)  # Shape: (B, 128, 13, 5)
-
-    return q_tilde
 
 class FixedVectorQuantizer(nn.Module):
     def __init__(self, num_embeddings, codebook_size, lambda_c=0.1, lambda_p=0.33):
@@ -444,6 +405,17 @@ class AntiRectifierLayer(nn.Module):
         self.function = function
     def forward(self, x):
         return self.function(x)
+
+
+
+class ComplexReLU(nn.Module):
+    def __init__(self, function):
+        super(ComplexReLU, self).__init__()
+        self.function = function
+    def forward(self, X):
+        return torch.complex(self.function(X.real), self.function(X.imag))
+
+
 
 # TODO: inherit SubspaceNet from DeepRootMUSIC
 class SubspaceNet(nn.Module):
@@ -695,6 +667,172 @@ class SubspaceNetEsprit(SubspaceNet):
         # Feed surrogate covariance to Esprit algorithm
         doa_prediction = esprit(Rz, self.M, self.batch_size)
         return doa_prediction, Rz, vq_loss
+
+class ComplexConv1d(nn.Module):
+    """ Complex-valued 1D Convolution Layer """
+    def __init__(self, in_channels, out_channels, kernel_size):
+        super().__init__()
+        self.conv_real = nn.Conv1d(in_channels, out_channels, kernel_size)
+        self.conv_imag = nn.Conv1d(in_channels, out_channels, kernel_size)
+        self.activation = nn.ReLU()
+
+    def forward(self, X):
+        real = self.conv_real(X.real) - self.conv_imag(X.imag)
+        imag = self.conv_real(X.imag) + self.conv_imag(X.real)
+        return torch.complex(real, imag)
+
+class ComplexConvTranspose1d(nn.Module):
+    """ Complex-valued 1D Transposed Convolution Layer """
+    def __init__(self, in_channels, out_channels, kernel_size):
+        super().__init__()
+        self.deconv_real = nn.ConvTranspose1d(in_channels, out_channels, kernel_size)
+        self.deconv_imag = nn.ConvTranspose1d(in_channels, out_channels, kernel_size)
+        self.activation = nn.ReLU()
+
+    def forward(self, X):
+        real = self.deconv_real(X.real) - self.deconv_imag(X.imag)
+        imag = self.deconv_real(X.imag) + self.deconv_imag(X.real)
+        return torch.complex(real, imag)
+
+
+
+
+class ComplexDropout(nn.Module):
+    def __init__(self, p=0.5):
+        super().__init__()
+        self.dropout = nn.Dropout(p)
+
+    def forward(self, X):
+        return torch.complex(self.dropout(X.real), self.dropout(X.imag))
+
+class SignalsSubspaceNetEsprit(SubspaceNetEsprit):
+    """SubspaceNet is model-based deep learning model for generalizing DOA estimation problem,
+        over subspace methods.
+        SubspaceNetEsprit is based on the ability to perform back-propagation using ESPRIT algorithm,
+        instead of RootMUSIC.
+
+    Attributes:
+    -----------
+        M (int): Number of sources.
+        tau (int): Number of auto-correlation lags.
+
+    Methods:
+    --------
+        forward(Rx_tau): Performs the forward pass of the SubspaceNet.
+
+    """
+
+    def __init__(self, N: int, T: int, tau: int, M: int, quantize_source=False, codebook_size=256):
+        super().__init__(8, M)
+        self.quantize_source = quantize_source
+
+        self.N = N
+        self.T = T
+
+        in_channels = 8
+        hidden_channels = 32
+        out_channels = 8
+        latent_dim=16
+
+        # TODO: check sizes of Conv
+
+
+        self.batchnorm1 = nn.BatchNorm2d(16)
+        self.batchnorm2 = nn.BatchNorm2d(32)
+        self.complex_rectifier = ComplexReLU(self.anti_rectifier)
+
+        self.anti_rectifier_layer = AntiRectifierLayer(self.complex_rectifier)
+
+        self.conv1 = ComplexConv1d(in_channels, 16, kernel_size=2)
+        self.conv2 = ComplexConv1d(32, 32, kernel_size=2)
+        self.conv3 = ComplexConv1d(64, 64, kernel_size=2)
+
+        self.deconv2 = ComplexConvTranspose1d(128, 32, kernel_size=2)
+        self.deconv3 = ComplexConvTranspose1d(64, 16, kernel_size=2)
+        self.deconv4 = ComplexConvTranspose1d(32, out_channels, kernel_size=2)
+
+        self.encoder_signal = nn.Sequential(self.conv1,
+                                            # self.batchnorm1,
+                                            self.anti_rectifier_layer,
+                                            self.conv2,
+                                            # self.batchnorm2,
+                                            self.anti_rectifier_layer,
+                                            self.conv3)
+
+
+        self.DropOut = ComplexDropout(0.2)
+        self.ReLU = nn.ReLU()
+
+        # Define The decoder of the AE architecture
+        self.decoder_signal = nn.Sequential(self.anti_rectifier_layer,
+                                            self.deconv2,
+                                            self.anti_rectifier_layer,
+                                            self.deconv3,
+                                            self.anti_rectifier_layer,
+                                            self.DropOut,
+                                            self.deconv4)
+
+        num_embeddings = 4
+        self.codebook_size = codebook_size
+        lambda_c = 0.1
+        lambda_p = 0.33
+        self.quantizer_signal = FixedVectorQuantizer(num_embeddings, self.codebook_size, lambda_c, lambda_p)
+
+        self.__unique_indices_set = set()
+
+    def forward(self, x: torch.Tensor):
+        self.batch_size = x.shape[0]
+
+        x_e = self.encoder_signal(x)
+
+        # Quantize
+        x_normalized = x_e - x_e.mean()
+
+        # quantize if needed
+        if self.quantize_source:
+            z_quantized, vq_loss = self.quantizer_signal(x_normalized)
+
+            self.__unique_indices_set.update(torch.unique(z_quantized).tolist())
+            self.codebook_utilization = len(self.__unique_indices_set) / self.codebook_size
+        else:
+            z_quantized, vq_loss = x_normalized, 0
+
+        x_hat = self.decoder_signal(z_quantized)
+
+        # Create the auto-correlation matrix out of after the quantization
+        Rx_matrix = self.calculate_cov_batch(x_hat)
+
+        # Apply Gram operation diagonal loading
+        Rz = gram_diagonal_overload(
+            Kx=Rx_matrix, eps=1, batch_size=self.batch_size
+        )  # Shape: [Batch size, N, N]
+
+        # Feed surrogate covariance to Esprit algorithm
+        doa_prediction = esprit(Rz, self.M, self.batch_size)
+        return doa_prediction, Rz, vq_loss
+
+    def calculate_cov_batch(self, x_batch):
+        batch_cov_matrices = []
+
+        # Iterate over batch dimension
+        for i in range(x_batch.shape[0]):
+            X_sample = x_batch[i]
+
+            # Compute mean across the sequence (axis=1)
+            X_mean = X_sample.mean(dim=1, keepdim=True)
+
+            # Center the data
+            X_centered = X_sample - X_mean
+
+            # Compute covariance ( matrix per batch sample)
+            cov_matrix = (X_centered @ X_centered.T) / (X_sample.shape[1] - 1)
+
+            batch_cov_matrices.append(cov_matrix)
+
+        # Convert list to tensor for batch processing
+        batch_cov_matrices = torch.stack(batch_cov_matrices)
+        return batch_cov_matrices
+
 
 
 class DeepAugmentedMUSIC(nn.Module):

@@ -104,6 +104,8 @@ def evaluate_dnn_model(
             elif model_type.startswith("SubspaceNet"):
                 # Default - SubSpaceNet
                 DOA_predictions = model_output[0]
+            elif model_type.startswith("SignalsSubspaceNet"):
+                DOA_predictions = model_output[0]
             else:
                 raise Exception(
                     f"evaluate_dnn_model: Model type {model_type} is not defined"

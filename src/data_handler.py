@@ -324,6 +324,20 @@ def load_datasets(
         datasets.append(samples_model)
     except:
         raise Exception("load_datasets: Samples model dataset doesn't exist")
+
+        # Load generic test dataset
+    try:
+            
+        generic_dataset_filename = f"Generic_DataSet" + set_dataset_filename(
+            system_model_params, samples_size
+        )
+        generic_train_dataset = read_data(
+            datasets_path / "train" / generic_dataset_filename
+        )
+        datasets.append(generic_train_dataset)
+    except:
+        raise Exception("load_datasets: Generic test dataset doesn't exist")
+
     return datasets
 
 

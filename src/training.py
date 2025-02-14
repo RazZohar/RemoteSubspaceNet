@@ -46,6 +46,7 @@ from src.utils import *
 from src.criterions import *
 from src.system_model import SystemModel, SystemModelParams
 from src.models import SubspaceNet, DeepCNN, DeepAugmentedMUSIC, ModelGenerator
+
 from src.evaluation import evaluate_dnn_model
 
 import json
@@ -393,6 +394,10 @@ def train_model(training_params: TrainingParams, model_name: str, checkpoint_pat
             # Get model output
             model_output = model(Rx)
             if training_params.model_type.startswith("SubspaceNet"):
+                # Default - SubSpaceNet
+                DOA_predictions = model_output[0]
+                vq_loss = model_output[-1]
+            elif training_params.model_type.startswith("SignalsSubspaceNet"):
                 # Default - SubSpaceNet
                 DOA_predictions = model_output[0]
                 vq_loss = model_output[-1]
