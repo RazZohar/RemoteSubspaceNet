@@ -401,6 +401,12 @@ def train_model(training_params: TrainingParams, model_name: str, checkpoint_pat
                 # Default - SubSpaceNet
                 DOA_predictions = model_output[0]
                 vq_loss = model_output[-1]
+            elif training_params.model_type.startswith("TaskIgnorantSubspaceNet"):
+                DOA_predictions = model_output[0]
+                train_loss = model_output[-1]
+                # add batch loss to overall epoch loss
+                overall_train_loss += train_loss.item()
+
             else:
                 # Deep Augmented MUSIC or DeepCNN
                 DOA_predictions = model_output
@@ -412,7 +418,8 @@ def train_model(training_params: TrainingParams, model_name: str, checkpoint_pat
                 )
                 # add batch loss to overall epoch loss
                 overall_train_loss += train_loss.item() * len(data[0])
-            else:
+
+            elif not training_params.model_type.startswith("TaskIgnorantSubspaceNet"):
                 ce_loss = training_params.criterion(DOA_predictions, DOA)
                 train_loss = ce_loss + vq_loss
 
@@ -439,6 +446,7 @@ def train_model(training_params: TrainingParams, model_name: str, checkpoint_pat
             training_params.valid_dataset,
             training_params.criterion,
             model_type=training_params.model_type,
+            validation_phase=True,
         )
 
         #TODO: find a way to handler multiple scheduler with adaptive learning rate

@@ -46,6 +46,7 @@ def evaluate_dnn_model(
     plot_spec: bool = False,
     figures: dict = None,
     model_type: str = "SubspaceNet",
+    validation_phase = False,
 ):
     """
     Evaluate the DNN model on a given dataset.
@@ -106,6 +107,10 @@ def evaluate_dnn_model(
                 DOA_predictions = model_output[0]
             elif model_type.startswith("SignalsSubspaceNet"):
                 DOA_predictions = model_output[0]
+            elif model_type.startswith("TaskIgnorantSubspaceNet"):
+                # for the task igonrant validation is on the restoreation task but test will be on accuracy of DOA
+                DOA_predictions = model_output[0]
+                train_loss = model_output[-1]
             else:
                 raise Exception(
                     f"evaluate_dnn_model: Model type {model_type} is not defined"
@@ -113,6 +118,8 @@ def evaluate_dnn_model(
             # Compute prediction loss
             if model_type.startswith("DeepCNN") and isinstance(criterion, RMSPELoss):
                 eval_loss = criterion(DOA_predictions.float(), DOA.float())
+            elif model_type.startswith("TaskIgnorantSubspaceNet") and validation_phase == True:
+                eval_loss = train_loss
             else:
                 eval_loss = criterion(DOA_predictions, DOA)
             # add the batch evaluation loss to epoch loss
