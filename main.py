@@ -147,9 +147,9 @@ if __name__ == "__main__":
         "TRAIN_QUANTIZED_SOURCES": False,  # Train the model for the quantization
 
         # Task ignorant quantization model
-        "TRAIN_MODEL_TASK_IGNORANT": True,  # Applying training operation for the sources
+        "TRAIN_MODEL_TASK_IGNORANT": False,  # Applying training operation for the sources
         "EVALUATE_MODE_SOURCES_TASK_IGNORANT": True,  # Evaluating desired algorithms
-        "CREATE_CODEBOOK_SOURCES_TASK_IGNORANT": False,  # Create the codebook for VQ-VAE
+        "CREATE_CODEBOOK_SOURCES_TASK_IGNORANT": True,  # Create the codebook for VQ-VAE
         "TRAIN_QUANTIZED_SOURCES_TASK_IGNORANT": False,  # Train the model for the quantization
     }
 
@@ -1316,7 +1316,7 @@ if __name__ == "__main__":
             generic_test_dataset, batch_size=1, shuffle=False, drop_last=False
         )
         # Load pre-trained model
-        if not commands["TRAIN_MODEL_SOURCES_TASK_IGNORANT"]:
+        if not commands["TRAIN_MODEL_TASK_IGNORANT"]:
             # simulation_filename = simulation_filename + f'_VQVAE_Quantized_{CODEBOOK_SIZE}' + '_Quantized_Trained_{codebook_size}'.format(
             #    codebook_size=CODEBOOK_SIZE)
 

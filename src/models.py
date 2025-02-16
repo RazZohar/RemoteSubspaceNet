@@ -911,10 +911,12 @@ class TaskIgnorantSubspaceNet(SubspaceNetEsprit):
 
         # quantize if needed
         if self.quantize_source:
-            z_quantized, vq_loss = self.quantizer_signal(x_normalized)
+            x_normalized_real = torch.view_as_real(x_normalized)
+            z_quantized, vq_loss = self.quantizer_signal(x_normalized_real)
 
             self.__unique_indices_set.update(torch.unique(z_quantized).tolist())
             self.codebook_utilization = len(self.__unique_indices_set) / self.codebook_size
+            z_quantized = torch.view_as_complex(z_quantized)
         else:
             z_quantized, vq_loss = x_normalized, 0
 

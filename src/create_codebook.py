@@ -77,6 +77,9 @@ def create_codebook_command(encoder : nn.Sequential, input_dataset, cb_vec_dim, 
         with torch.no_grad():
             z_e = encoder(Rx)
         z_e = z_e - z_e.mean()
+        if torch.is_complex(z_e):
+            z_e = torch.view_as_real(z_e)
+
         flatten_ze_sub.append(z_e.view(-1, cb_vec_dim))
 
     #kmeans = KMeans(num_clusters, **kmeans_kwargs)
@@ -115,6 +118,9 @@ def batch_cdist_and_argmin(data, centroids, cluster_assignments_temp, batch_size
         batch = data[start:end]  # Get the current batch
 
         # Compute distances for the batch
+        if torch.is_complex(batch):
+            batch_real = torch.view_as_real(batch)
+            batch = batch_real
         distances = torch.cdist(batch, centroids, p=2)  # Shape: (batch_size, num_centroids)
 
         # Find the index of the closest centroid (argmin)
