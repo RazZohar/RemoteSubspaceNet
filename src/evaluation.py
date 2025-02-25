@@ -464,18 +464,22 @@ def evaluate(
         model_type=model_type,
     )
     print(f"{model_type} Test loss = {model_test_loss}")
-    # Evaluate SubspaceNet augmented methods
-    for algorithm in augmented_methods:
-        loss = evaluate_augmented_model(
-            model=model,
-            dataset=model_test_dataset,
-            system_model=system_model,
-            criterion=subspace_criterion,
-            algorithm=algorithm,
-            plot_spec=plot_spec,
-            figures=figures,
-        )
-        print("augmented {} test loss = {}".format(algorithm, loss))
+
+    if model_type != "TaskIgnorantSubspaceNet":
+
+        # Evaluate SubspaceNet augmented methods
+        for algorithm in augmented_methods:
+            loss = evaluate_augmented_model(
+                model=model,
+                dataset=model_test_dataset,
+                system_model=system_model,
+                criterion=subspace_criterion,
+                algorithm=algorithm,
+                plot_spec=plot_spec,
+                figures=figures,
+            )
+            print("augmented {} test loss = {}".format(algorithm, loss))
+
     # Evaluate classical subspace methods
     for algorithm in subspace_methods:
         loss = evaluate_model_based(

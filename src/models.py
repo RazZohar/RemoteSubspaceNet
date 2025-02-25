@@ -901,6 +901,9 @@ class TaskIgnorantSubspaceNet(SubspaceNetEsprit):
 
         self.__unique_indices_set = set()
 
+    def set_quantize(self, quantize: bool):
+        self.quantize_source = quantize
+
     def forward(self, x: torch.Tensor):
         self.batch_size = x.shape[0]
 
