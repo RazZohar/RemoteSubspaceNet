@@ -279,6 +279,38 @@ def gram_diagonal_overload(Kx: torch.Tensor, eps: float, batch_size: int):
     Kx_Out = torch.stack(Kx_list, dim=0)
     return Kx_Out
 
+def add_epsilon_batch(Kx: torch.Tensor, eps: float, batch_size: int):
+    """Multiply a matrix Kx with its Hermitian conjecture (gram matrix),
+        and adds eps to the diagonal values of the matrix,
+        ensuring a Hermitian and PSD (Positive Semi-Definite) matrix.
+
+    Args:
+    -----
+        Kx (torch.Tensor): Complex matrix with shape [BS, N, N],
+            where BS is the batch size and N is the matrix size.
+        eps (float): Constant multiplier added to each diagonal element.
+        batch_size(int): The number of batches
+
+    Returns:
+    --------
+        torch.Tensor: Hermitian and PSD matrix with shape [BS, N, N].
+
+    """
+    # Insuring Tensor input
+    if not isinstance(Kx, torch.Tensor):
+        Kx = torch.tensor(Kx)
+
+    Kx_list = []
+    bs_kx = Kx
+    for iter in range(batch_size):
+        K = bs_kx[iter]
+
+        # Diagonal loading
+        eps_addition = (eps * torch.diag(torch.ones(K.shape[0]))).to(device)
+        Rz = K + eps_addition
+        Kx_list.append(Rz)
+    Kx_Out = torch.stack(Kx_list, dim=0)
+    return Kx_Out
 
 if __name__ == "__main__":
     # sum_of_diag example

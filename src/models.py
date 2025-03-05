@@ -46,7 +46,7 @@ import warnings
 from torch.ao.quantization import quantize
 
 import src.qunatizer
-from src.utils import gram_diagonal_overload, device
+from src.utils import gram_diagonal_overload, device, add_epsilon_batch
 from src.utils import sum_of_diags_torch, find_roots_torch
 
 from src.qunatizer import FixedVectorQuantizer, AdaptiveVectorQuantizer
@@ -782,6 +782,9 @@ class SignalsSubspaceNetEsprit(SubspaceNetEsprit):
 
         self.__unique_indices_set = set()
 
+    def set_quantize(self, quantize: bool):
+        self.quantize_source = quantize
+
     def forward(self, x: torch.Tensor):
         self.batch_size = x.shape[0]
 
@@ -792,10 +795,12 @@ class SignalsSubspaceNetEsprit(SubspaceNetEsprit):
 
         # quantize if needed
         if self.quantize_source:
-            z_quantized, vq_loss = self.quantizer_signal(x_normalized)
+            x_normalized_real = torch.view_as_real(x_normalized)
+            z_quantized, vq_loss = self.quantizer_signal(x_normalized_real)
 
             self.__unique_indices_set.update(torch.unique(z_quantized).tolist())
             self.codebook_utilization = len(self.__unique_indices_set) / self.codebook_size
+            z_quantized = torch.view_as_complex(z_quantized)
         else:
             z_quantized, vq_loss = x_normalized, 0
 
@@ -805,9 +810,7 @@ class SignalsSubspaceNetEsprit(SubspaceNetEsprit):
         Rx_matrix = self.calculate_cov_batch(x_hat)
 
         # Apply Gram operation diagonal loading
-        Rz = gram_diagonal_overload(
-            Kx=Rx_matrix, eps=1, batch_size=self.batch_size
-        )  # Shape: [Batch size, N, N]
+        Rz = add_epsilon_batch(Kx=Rx_matrix, eps=1, batch_size=self.batch_size)
 
         # Feed surrogate covariance to Esprit algorithm
         doa_prediction = esprit(Rz, self.M, self.batch_size)
@@ -821,8 +824,10 @@ class SignalsSubspaceNetEsprit(SubspaceNetEsprit):
         X_centered = x_batch - X_mean
 
         # Compute covariance in a batch-wise manner
-        batch_cov_matrices = torch.matmul(X_centered, X_centered.transpose(1, 2)) / (
+        batch_cov_matrices = torch.matmul(X_centered, torch.conj(X_centered.transpose(1, 2))) / (
                     x_batch.shape[2] - 1)
+
+
 
         return batch_cov_matrices
 
@@ -933,9 +938,7 @@ class TaskIgnorantSubspaceNet(SubspaceNetEsprit):
         Rx_matrix = self.calculate_cov_batch(x_hat)
 
         # Apply Gram operation diagonal loading
-        Rz = gram_diagonal_overload(
-            Kx=Rx_matrix, eps=1, batch_size=self.batch_size
-        )  # Shape: [Batch size, N, N]
+        Rz = add_epsilon_batch(Kx=Rx_matrix, eps=1, batch_size=self.batch_size)
 
         # Feed surrogate covariance to Esprit algorithm
         doa_prediction = esprit(Rz, self.M, self.batch_size)
@@ -949,8 +952,8 @@ class TaskIgnorantSubspaceNet(SubspaceNetEsprit):
         X_centered = x_batch - X_mean
 
         # Compute covariance in a batch-wise manner
-        batch_cov_matrices = torch.matmul(X_centered, X_centered.transpose(1, 2)) / (
-                    x_batch.shape[2] - 1)
+        batch_cov_matrices = torch.matmul(X_centered, torch.conj(X_centered.transpose(1, 2))) / (
+                x_batch.shape[2] - 1)
 
         return batch_cov_matrices
 

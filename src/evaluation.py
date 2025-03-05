@@ -465,7 +465,7 @@ def evaluate(
     )
     print(f"{model_type} Test loss = {model_test_loss}")
 
-    if model_type != "TaskIgnorantSubspaceNet":
+    if model_type != "TaskIgnorantSubspaceNet" and model_type != "SignalsSubspaceNet":
 
         # Evaluate SubspaceNet augmented methods
         for algorithm in augmented_methods:

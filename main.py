@@ -141,16 +141,16 @@ if __name__ == "__main__":
         "TRAIN_SCALAR_QUANTIZATION" : False, # Train the model for Scalar quantization
 
         # Source - task based quantization
-        "TRAIN_MODEL_SOURCES": True,  # Applying training operation for the sources
-        "EVALUATE_MODE_SOURCES": True,  # Evaluating desired algorithms
+        "TRAIN_MODEL_SOURCES": False,  # Applying training operation for the sources
+        "EVALUATE_MODE_SOURCES": False,  # Evaluating desired algorithms
         "CREATE_CODEBOOK_SOURCES": False,  # Create the codebook for VQ-VAE
         "TRAIN_QUANTIZED_SOURCES": False,  # Train the model for the quantization
 
         # Task ignorant quantization model
         "TRAIN_MODEL_TASK_IGNORANT": False,  # Applying training operation for the sources
-        "EVALUATE_MODE_SOURCES_TASK_IGNORANT": False,  # Evaluating desired algorithms
-        "CREATE_CODEBOOK_SOURCES_TASK_IGNORANT": False,  # Create the codebook for VQ-VAE
-        "TRAIN_QUANTIZED_SOURCES_TASK_IGNORANT": False,  # Train the model for the quantization
+        "EVALUATE_MODE_SOURCES_TASK_IGNORANT": True,  # Evaluating desired algorithms
+        "CREATE_CODEBOOK_SOURCES_TASK_IGNORANT": True,  # Create the codebook for VQ-VAE
+        "TRAIN_QUANTIZED_SOURCES_TASK_IGNORANT": True,  # Train the model for the quantization
     }
 
     CODEBOOK_SIZE = 4
@@ -181,7 +181,7 @@ if __name__ == "__main__":
     MAXIMAL_TAU = 8
     model_config = (
         ModelGenerator()
-        .set_model_type("SignalsSubspaceNet") #"TaskIgnorantSubspaceNet", TaskIgnorantSubspaceNet
+        .set_model_type("TaskIgnorantSubspaceNet") #"TaskIgnorantSubspaceNet", SignalsSubspaceNet
         .set_diff_method("esprit")
         .set_tau(min(MAXIMAL_TAU, system_model_params.T - 1))
         .set_model(system_model_params)
@@ -710,7 +710,7 @@ if __name__ == "__main__":
         # Load the VQ_VAE model
         simulation_filename = simulation_filename + f'_VQVAE'
 
-        CODEBOOK_SIZE = 256
+        CODEBOOK_SIZE = 2
         codebook = codebook_creation.create_codebook_command(model.encoder_signal, codebook_creation_dataset, cb_vec_dim=4,
                                                              num_clusters=CODEBOOK_SIZE)
         base_simulation_name = get_simulation_filename(
@@ -725,15 +725,15 @@ if __name__ == "__main__":
         model = model.to(device=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
         model.codebook_size = CODEBOOK_SIZE
         model.set_quantize(True)
-        model.quantizer.set_codebook_size(CODEBOOK_SIZE)  # Set empty codebook at requested size
-        model.quantizer.active_vectors = codebook
-        model.quantizer.lambda_c = 1.0
+        model.quantizer_signal.set_codebook_size(CODEBOOK_SIZE)  # Set empty codebook at requested size
+        model.quantizer_signal.active_vectors = codebook
+        model.quantizer_signal.lambda_c = 1.0
 
         print(
-            f'Created the codebook for the subspace with VQ-VAE, with codebook size = {model.quantizer.p}')
+            f'Created the codebook for the subspace with VQ-VAE, with codebook size = {model.quantizer_signal.p}')
 
         # Train only the decoder
-        for param in model.encoder.parameters():
+        for param in model.encoder_signal.parameters():
             param.requires_grad = False
 
         # Apply Small train to optimaize with the codebook
@@ -746,7 +746,7 @@ if __name__ == "__main__":
                                  .set_criterion()
                                  )
         # Set the New optimzer for quantize and decoder only
-        optimizer = optim.Adam(list(model.decoder.parameters()), lr=0.0005, weight_decay=1e-4)
+        optimizer = optim.Adam(list(model.decoder_signal.parameters()), lr=0.0005, weight_decay=1e-4)
         simulation_parameters.optimizer = optimizer
 
         # Assign schedular for learning rate decay
@@ -793,7 +793,7 @@ if __name__ == "__main__":
             plt.show()
 
         # For this purpose we use evaluate
-        usage_counts = model.quantizer.visualize_codebook_usage()
+        usage_counts = model.quantizer_signal.visualize_codebook_usage()
         plt.figure(figsize=(10, 6))
         plt.bar(range(len(usage_counts)), usage_counts)
         plt.xlabel("Codebook Entry Index")
@@ -801,11 +801,11 @@ if __name__ == "__main__":
         plt.title(f'Codebook Entry Usage Codebook size ={CODEBOOK_SIZE}')
         plt.show()
 
-        print(f'The usage of codebook is {(model.quantizer.general_codebook_usage / CODEBOOK_SIZE) * 100:.2f} [%]')
+        print(f'The usage of codebook is {(model.quantizer_signal.general_codebook_usage / CODEBOOK_SIZE) * 100:.2f} [%]')
         # evaluate_model_command()
 
     if commands["TRAIN_QUANTIZED_SOURCES"]:
-        CODEBOOK_SIZE = 256
+        CODEBOOK_SIZE = 2
         CLUSTERS_COUNT = CODEBOOK_SIZE
 
         base_simulation_name = get_simulation_filename(
@@ -840,10 +840,10 @@ if __name__ == "__main__":
         model = model.to(device=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
         model.codebook_size = CODEBOOK_SIZE
         model.set_quantize(True)
-        model.quantizer.set_codebook_size(CODEBOOK_SIZE)  # Set empty codebook at requested size
-        model.quantizer.active_vectors = codebook
-        model.quantizer.lambda_c = 1.0
-        model.quantizer.apply(lambda module: codebook_creation.init_weights_lbg(module, codebook))
+        model.quantizer_signal.set_codebook_size(CODEBOOK_SIZE)  # Set empty codebook at requested size
+        model.quantizer_signal.active_vectors = codebook
+        model.quantizer_signal.lambda_c = 1.0
+        model.quantizer_signal.apply(lambda module: codebook_creation.init_weights_lbg(module, codebook))
 
         # Train only the decoder
         # simulation_filename = simulation_filename + '_Quantized_Trained'
@@ -890,7 +890,7 @@ if __name__ == "__main__":
             plt.show()
 
         # For this purpose we use evaluate
-        usage_counts = model.quantizer.visualize_codebook_usage()
+        usage_counts = model.quantizer_signal.visualize_codebook_usage()
         plt.figure(figsize=(10, 6))
         plt.bar(range(len(usage_counts)), usage_counts)
         plt.xlabel("Codebook Entry Index")
@@ -898,7 +898,7 @@ if __name__ == "__main__":
         plt.title(f'Codebook Entry Usage Codebook size ={CODEBOOK_SIZE}')
         plt.show()
 
-        print(f'The usage of codebook is {(model.quantizer.general_codebook_usage / CODEBOOK_SIZE) * 100:.2f} [%]')
+        print(f'The usage of codebook is {(model.quantizer_signal.general_codebook_usage / CODEBOOK_SIZE) * 100:.2f} [%]')
         # evaluate_model_command()
 
     # For the task ignorant model
@@ -985,7 +985,7 @@ if __name__ == "__main__":
         # Load the VQ_VAE model
         simulation_filename = simulation_filename + f'_task_ignorant'
 
-        CODEBOOK_SIZE = 4
+        CODEBOOK_SIZE = 2
         codebook = codebook_creation.create_codebook_command(model.encoder_signal, codebook_creation_dataset, cb_vec_dim=4,
                                                              num_clusters=CODEBOOK_SIZE)
         base_simulation_name = get_simulation_filename(
@@ -1080,7 +1080,7 @@ if __name__ == "__main__":
         # evaluate_model_command()
 
     if commands["TRAIN_QUANTIZED_SOURCES_TASK_IGNORANT"]:
-        CODEBOOK_SIZE = 4
+        CODEBOOK_SIZE = 2
         CLUSTERS_COUNT = CODEBOOK_SIZE
 
         base_simulation_name = get_simulation_filename(
