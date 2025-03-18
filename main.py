@@ -142,15 +142,17 @@ if __name__ == "__main__":
 
         # Source - task based quantization
         "TRAIN_MODEL_SOURCES": False,  # Applying training operation for the sources
-        "EVALUATE_MODE_SOURCES": False,  # Evaluating desired algorithms
+        "EVALUATE_MODE_SOURCES": True,  # Evaluating desired algorithms
         "CREATE_CODEBOOK_SOURCES": False,  # Create the codebook for VQ-VAE
         "TRAIN_QUANTIZED_SOURCES": False,  # Train the model for the quantization
 
         # Task ignorant quantization model
         "TRAIN_MODEL_TASK_IGNORANT": False,  # Applying training operation for the sources
-        "EVALUATE_MODE_SOURCES_TASK_IGNORANT": True,  # Evaluating desired algorithms
-        "CREATE_CODEBOOK_SOURCES_TASK_IGNORANT": True,  # Create the codebook for VQ-VAE
-        "TRAIN_QUANTIZED_SOURCES_TASK_IGNORANT": True,  # Train the model for the quantization
+        "EVALUATE_MODE_SOURCES_TASK_IGNORANT": False,  # Evaluating desired algorithms
+        "CREATE_CODEBOOK_SOURCES_TASK_IGNORANT": False,  # Create the codebook for VQ-VAE
+        "TRAIN_QUANTIZED_SOURCES_TASK_IGNORANT": False,  # Train the model for the quantization
+
+        "TRAIN_SCALAR_QUANTIZATION_SOURCES" : True, # Train the model for Scalar quantization
     }
 
     CODEBOOK_SIZE = 4
@@ -181,7 +183,7 @@ if __name__ == "__main__":
     MAXIMAL_TAU = 8
     model_config = (
         ModelGenerator()
-        .set_model_type("TaskIgnorantSubspaceNet") #"TaskIgnorantSubspaceNet", SignalsSubspaceNet
+        .set_model_type("SignalsSubspaceNet") #"TaskIgnorantSubspaceNet", SignalsSubspaceNet
         .set_diff_method("esprit")
         .set_tau(min(MAXIMAL_TAU, system_model_params.T - 1))
         .set_model(system_model_params)
@@ -900,6 +902,90 @@ if __name__ == "__main__":
 
         print(f'The usage of codebook is {(model.quantizer_signal.general_codebook_usage / CODEBOOK_SIZE) * 100:.2f} [%]')
         # evaluate_model_command()
+
+    if commands["TRAIN_SCALAR_QUANTIZATION_SOURCES"]:
+
+        # Load a pretrained model
+        criterion, subspace_criterion = set_criterions("rmse")
+
+        simulation_parameters = (
+            TrainingParams()
+            .set_model(model=model_config)
+            .load_model(
+                loading_path=saving_path
+                             / "final_models"
+                             / simulation_filename
+            )
+        )
+        model = simulation_parameters.model
+
+        CODEBOOK_SIZE = 4
+
+        quantize_creation_dataset = torch.utils.data.DataLoader(
+            generic_train_dataset, batch_size=1024, shuffle=False, drop_last=False
+        )
+
+        max_ze, min_ze = codebook_creation.get_min_max(model.encoder_signal, quantize_creation_dataset)
+
+        scalar_quantizer = quantizer.ElementWiseQuantizer(min_val=min_ze, max_val=max_ze, n_levels=CODEBOOK_SIZE)
+
+        print(f'Load the codebook for the subspace with scalar')
+        base_simulation_name = get_simulation_filename(
+            system_model_params=system_model_params, model_config=model_config
+        )
+
+        # Start the fine tunning step
+        # Start the fine tunning step
+        model = model.to(device=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+        model.codebook_size = CODEBOOK_SIZE
+        model.set_quantize(True)
+        model.quantizer_signal = scalar_quantizer
+        # scalar Quantization
+
+        # Apply Small train to optimaize with the codebook
+        simulation_parameters = (simulation_parameters
+                                 .set_batch_size(1024)
+                                 .set_epochs(10)
+                                 .set_optimizer(optimizer="Adam", learning_rate=0.0005, weight_decay=5e-6)
+                                 .set_training_dataset(generic_train_dataset)
+                                 .set_schedular(step_size=60, gamma=0.8)
+                                 .set_criterion()
+                                 )
+
+        # Print training simulation details
+        simulation_summary(
+            system_model_params=system_model_params,
+            model_type=model_config.model_type,
+            parameters=simulation_parameters,
+            phase="training",
+        )
+        # Perform simulation training and evaluation stages
+        model, loss_train_list, loss_valid_list = train(
+            training_parameters=simulation_parameters,
+            model_name=simulation_filename,
+            saving_path=saving_path,
+        )
+
+        simulation_filename = simulation_filename + '_Sources_Quantized_scalar_Trained_{codebook_size}'.format(
+            codebook_size=CODEBOOK_SIZE)
+
+        # Save model weights
+        if commands["SAVE_MODEL"]:
+            torch.save(
+                model.state_dict(),
+                saving_path / "final_models" / Path(simulation_filename),
+            )
+        # Plots saving
+        if commands["SAVE_TO_FILE"]:
+            plt.savefig(
+                simulations_path
+                / "results"
+                / "plots"
+                / Path(dt_string_for_save + r".png")
+            )
+        else:
+            plt.show()
+
 
     # For the task ignorant model
     if commands["TRAIN_MODEL_TASK_IGNORANT"]:

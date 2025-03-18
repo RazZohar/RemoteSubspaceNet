@@ -150,7 +150,7 @@ class ElementWiseQuantizer(nn.Module):
         # Adaptive Uniform quantization
         #self.init_limits(x)
         # Use Noise with the quantization distrbuited uniformally
-        x = x + ((self.max_val - self.min_val) * torch.rand(x.shape) + self.min_val)
+        x = x #+ ((self.max_val - self.min_val) * torch.rand(x.shape) + self.min_val)
 
         with torch.no_grad():
             x_clamped = torch.clamp(x, self.min_val, self.max_val)  # Clip values

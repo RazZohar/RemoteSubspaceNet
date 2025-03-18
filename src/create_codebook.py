@@ -252,6 +252,9 @@ def get_min_max(encoder : nn.Sequential, input_dataset):
         with torch.no_grad():
             z_e = encoder(Rx)
 
+            if torch.is_complex(z_e):
+                z_e = torch.view_as_real(z_e)
+
             global_max_ze = max(global_max_ze, torch.max(z_e))  # Update max
             global_min_ze = min(global_min_ze, torch.min(z_e))  # Update min
 
