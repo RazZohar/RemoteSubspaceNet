@@ -160,9 +160,11 @@ class ModelGenerator(object):
                 quantize=False, codebook_size=system_model_params.codebook_size
             )
         elif self.model_type.startswith("SignalsSubspaceNet"):
-            self.model = SignalsSubspaceNetEsprit(N=system_model_params.N, T=system_model_params.T, tau=self.tau, M=system_model_params.M)
+            self.model = SignalsSubspaceNetEsprit(N=system_model_params.N, T=system_model_params.T, tau=self.tau, M=system_model_params.M, codebook_size=system_model_params.codebook_size)
+            #self.model.set_diff_method(diff_method=self.diff_method)
         elif self.model_type.startswith("TaskIgnorantSubspaceNet"):
-            self.model = TaskIgnorantSubspaceNet(N=system_model_params.N, T=system_model_params.T, tau=self.tau, M=system_model_params.M)
+            self.model = TaskIgnorantSubspaceNet(N=system_model_params.N, T=system_model_params.T, tau=self.tau, M=system_model_params.M, codebook_size=system_model_params.codebook_size)
+            #self.model.set_diff_method(diff_method=self.diff_method)
         else:
             raise Exception(
                 f"ModelGenerator.set_model: Model type {self.model_type} is not defined"
@@ -708,7 +710,8 @@ class ComplexDropout(nn.Module):
         return torch.complex(self.dropout(X.real), self.dropout(X.imag))
 
 class SignalsSubspaceNetEsprit(SubspaceNetEsprit):
-    """SubspaceNet is model-based deep learning model for generalizing DOA estimation problem,
+    """
+    SubspaceNet is model-based deep learning model for generalizing DOA estimation problem,
         over subspace methods.
         SubspaceNetEsprit is based on the ability to perform back-propagation using ESPRIT algorithm,
         instead of RootMUSIC.
@@ -781,6 +784,7 @@ class SignalsSubspaceNetEsprit(SubspaceNetEsprit):
         self.quantizer_signal = FixedVectorQuantizer(num_embeddings, self.codebook_size, lambda_c, lambda_p)
 
         self.__unique_indices_set = set()
+        self.online_inference = False
 
     def set_quantize(self, quantize: bool):
         self.quantize_source = quantize
@@ -809,9 +813,23 @@ class SignalsSubspaceNetEsprit(SubspaceNetEsprit):
         # Create the auto-correlation matrix out of after the quantization
         Rx_matrix = self.calculate_cov_batch(x_hat)
 
+        # Update progressivly if enabled
+        Rx_matrix = self.calculate_progressive_coveriance(Rx_matrix)
+
         # Apply Gram operation diagonal loading
         Rz = add_epsilon_batch(Kx=Rx_matrix, eps=1, batch_size=self.batch_size)
 
+        # Feed surrogate covariance to the differentiable subspace algorithm
+        """method_output = self.diff_method(Rz, self.M, self.batch_size)
+        if isinstance(method_output, tuple):
+            # Root MUSIC output
+            doa_prediction, doa_all_predictions, roots = method_output
+        else:
+            # Esprit output
+            doa_prediction = method_output
+            doa_all_predictions, roots = None, None
+        return doa_prediction, doa_all_predictions, roots, Rz, vq_loss
+        """
         # Feed surrogate covariance to Esprit algorithm
         doa_prediction = esprit(Rz, self.M, self.batch_size)
         return doa_prediction, Rz, vq_loss
@@ -830,6 +848,59 @@ class SignalsSubspaceNetEsprit(SubspaceNetEsprit):
 
 
         return batch_cov_matrices
+
+
+    def init_online_history(self, horizon_constant):
+        """
+        This function introduce online infernece with init of time horizon and 
+        Coveriance Matrix history holder.
+        Args:
+            horizon_constant: The time constant each samples quantized and then decoded
+
+        Returns:
+            Inatalization of the relvant field members
+        """
+        self.online_inference = True
+        self.online_cov_history = []
+        self.sub_horizon_time_constant = horizon_constant
+        self.horizon_index = 0
+        self.online_inference_factor = 0.5
+
+
+    def calculate_progressive_coveriance(self, current_rx_matrix):
+        """
+        This function introduce online infernece with init of time horizon and calculate the progressive
+        Coveriance matrix in each and every step.
+        Args:
+            current_rx_matrix:
+                The coveriance matrix calculated for observed time horizon T'
+        Returns:
+            If this is the first step we return current rx matrix otherwise we return
+            the combination of previous aggregated matrix and currently calculated matrix
+        """
+        if self.online_inference:
+            if self.horizon_index == 0:
+                self.online_cov_history.insert(self.horizon_index, current_rx_matrix)
+                self.horizon_index += 1
+            else:
+                temp_k = self.horizon_index
+                calculated_cov = (temp_k / (temp_k + 1)) * self.online_cov_history[self.horizon_index - 1] + (1 / (temp_k + 1)) * current_rx_matrix
+                self.online_cov_history.insert(self.horizon_index, calculated_cov)
+                self.horizon_index += 1
+                return calculated_cov
+
+        return current_rx_matrix
+
+
+    def reset_online_history(self):
+        """
+        Reset the aggreative converiance history to deault values
+        Returns:
+
+        """
+        self.online_cov_history = []
+        self.horizon_index = 0
+
 
 class TaskIgnorantSubspaceNet(SubspaceNetEsprit):
     """SubspaceNet is model-based deep learning model for generalizing DOA estimation problem,
@@ -940,9 +1011,20 @@ class TaskIgnorantSubspaceNet(SubspaceNetEsprit):
         # Apply Gram operation diagonal loading
         Rz = add_epsilon_batch(Kx=Rx_matrix, eps=1, batch_size=self.batch_size)
 
-        # Feed surrogate covariance to Esprit algorithm
+        # Feed surrogate covariance to the differentiable subspace algorithm
+        """method_output = self.diff_method(Rz, self.M, self.batch_size)
+        if isinstance(method_output, tuple):
+            # Root MUSIC output
+            doa_prediction, doa_all_predictions, roots = method_output
+        else:
+            # Esprit output
+            doa_prediction = method_output
+            doa_all_predictions, roots = None, None
+        return doa_prediction, doa_all_predictions, roots, Rz, total_loss
+        """
         doa_prediction = esprit(Rz, self.M, self.batch_size)
         return doa_prediction, Rz, total_loss
+
 
     def calculate_cov_batch(self, x_batch):
         # Compute mean across sequence (dim=2)
@@ -1280,6 +1362,12 @@ def esprit(Rz: torch.Tensor, M: int, batch_size: int):
         eigenvalues_angels = torch.angle(phi_eigenvalues)
         # Calculate the DoA out of the phase component
         doa_predictions = -1 * torch.arcsin((1 / np.pi) * eigenvalues_angels)
-        doa_batches.append(doa_predictions)
+
+        #TODO: Check for convension
+        phase_shifts = torch.angle(phi_eigenvalues)
+        sin_theta = torch.clamp(phase_shifts / np.pi, -1.0, 1.0)
+        doa_predictions = torch.arcsin(sin_theta)
+
+        doa_batches.append(-doa_predictions)
 
     return torch.stack(doa_batches, dim=0)

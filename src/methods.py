@@ -588,6 +588,12 @@ class Esprit(RootMUSIC):
         doa_predictions = -1 * self.extract_predictions_from_roots(phi_eigenvalues)[0]
         return doa_predictions, M
 
+    def extract_predictions_from_roots(self, eigenvalues):
+        phase_shifts = np.angle(eigenvalues)  # in radians
+        sin_theta = np.clip(phase_shifts / np.pi, -1.0, 1.0)  # prevent domain errors
+        doa_rad = np.arcsin(sin_theta)  # in radians
+        return doa_rad
+
 
 class MVDR(MUSIC):
     """

@@ -143,8 +143,12 @@ if __name__ == "__main__":
         # Source - task based quantization
         "TRAIN_MODEL_SOURCES": False,  # Applying training operation for the sources
         "EVALUATE_MODE_SOURCES": True,  # Evaluating desired algorithms
-        "CREATE_CODEBOOK_SOURCES": False,  # Create the codebook for VQ-VAE
-        "TRAIN_QUANTIZED_SOURCES": False,  # Train the model for the quantization
+        "CREATE_CODEBOOK_SOURCES": True,  # Create the codebook for VQ-VAE
+        "TRAIN_QUANTIZED_SOURCES": True,  # Train the model for the quantization
+
+        # Online train of the model
+        "TRAIN_ONLINE_SOURCES" : False,
+        "EVALUATE_ONLINE_MODE_SOURCES" : False,
 
         # Task ignorant quantization model
         "TRAIN_MODEL_TASK_IGNORANT": False,  # Applying training operation for the sources
@@ -986,6 +990,91 @@ if __name__ == "__main__":
         else:
             plt.show()
 
+    if commands["TRAIN_ONLINE_SOURCES"]:
+        #TODO: Create an online train model
+        CODEBOOK_SIZE = 256
+        CLUSTERS_COUNT = CODEBOOK_SIZE
+
+        base_simulation_name = get_simulation_filename(
+            system_model_params=system_model_params, model_config=model_config
+        )
+
+        simulation_filename = base_simulation_name + f'_VQVAE_QuantizedSources_{CODEBOOK_SIZE}'
+        # Load a pretrained model
+        criterion, subspace_criterion = set_criterions("rmse")
+        simulation_parameters = (
+            TrainingParams()
+            .set_model(model=model_config)
+            .load_model(
+                loading_path=saving_path
+                             / "final_models"
+                             / simulation_filename
+            )
+        )
+        model = simulation_parameters.model
+
+        print(f'Load the codebook for the subspace with VQ-VAE')
+        base_simulation_name = get_simulation_filename(
+            system_model_params=system_model_params, model_config=model_config
+        )
+        codebook_filename = "codebook_sources_{codebook_size}_{simulation_name}.npy".format(codebook_size=CODEBOOK_SIZE,
+                                                                                            simulation_name=base_simulation_name)
+
+        codebook = np.load(saving_path / codebook_filename)
+
+        # Start the fine tunning step
+        # Start the fine tunning step
+        model = model.to(device=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+        model.codebook_size = CODEBOOK_SIZE
+        model.set_quantize(True)
+        model.quantizer_signal.set_codebook_size(CODEBOOK_SIZE)  # Set empty codebook at requested size
+        model.quantizer_signal.active_vectors = codebook
+        model.quantizer_signal.lambda_c = 1.0
+        model.quantizer_signal.apply(lambda module: codebook_creation.init_weights_lbg(module, codebook))
+
+        # Train only the decoder
+        # simulation_filename = simulation_filename + '_Quantized_Trained'
+        simulation_filename = simulation_filename + '_QuantizedSources_OnlineTrained_{codebook_size}'.format(
+            codebook_size=CODEBOOK_SIZE)
+        # Apply Small train to optimaize with the codebook
+        simulation_parameters = (simulation_parameters
+                                 .set_batch_size(1024)
+                                 .set_epochs(10)
+                                 .set_optimizer(optimizer="Adam", learning_rate=0.0005, weight_decay=5e-6)
+                                 .set_training_dataset(generic_train_dataset)
+                                 .set_schedular(step_size=60, gamma=0.8)
+                                 .set_criterion()
+                                 )
+
+        # Print training simulation details
+        simulation_summary(
+            system_model_params=system_model_params,
+            model_type=model_config.model_type,
+            parameters=simulation_parameters,
+            phase="training",
+        )
+        # Perform simulation training and evaluation stages
+        model, loss_train_list, loss_valid_list = train(
+            training_parameters=simulation_parameters,
+            model_name=simulation_filename,
+            saving_path=saving_path,
+        )
+        # Save model weights
+        if commands["SAVE_MODEL"]:
+            torch.save(
+                model.state_dict(),
+                saving_path / "final_models" / Path(simulation_filename),
+            )
+        # Plots saving
+        if commands["SAVE_TO_FILE"]:
+            plt.savefig(
+                simulations_path
+                / "results"
+                / "plots"
+                / Path(dt_string_for_save + r".png")
+            )
+        else:
+            plt.show()
 
     # For the task ignorant model
     if commands["TRAIN_MODEL_TASK_IGNORANT"]:
@@ -1436,6 +1525,75 @@ if __name__ == "__main__":
             figures=figures,
             plot_spec=plot_spectrum_flag,
         )
+
+
+    # Evaluation stage
+    if commands["EVALUATE_ONLINE_MODE_SOURCES"]:
+        CODEBOOK_SIZE = 128
+        # Initialize figures dict for plotting
+        figures = initialize_figures()
+        # Define loss measure for evaluation
+        criterion, subspace_criterion = set_criterions("rmse")
+        # Load datasets for evaluation
+        if not (commands["CREATE_DATA"] or commands["LOAD_DATA"]):
+            test_dataset, generic_test_dataset, samples_model = load_datasets(
+                system_model_params=system_model_params,
+                model_type=model_config.model_type,
+                samples_size=samples_size,
+                datasets_path=datasets_path,
+                train_test_ratio=train_test_ratio,
+            )
+        # Generate DataLoader objects
+        model_test_dataset = torch.utils.data.DataLoader(
+            test_dataset, batch_size=1, shuffle=False, drop_last=False
+        )
+        generic_test_dataset = torch.utils.data.DataLoader(
+            generic_test_dataset, batch_size=1, shuffle=False, drop_last=False
+        )
+        # Load pre-trained model
+        if not commands["TRAIN_MODEL_SOURCES"]:
+            base_simulation_name = get_simulation_filename(
+                system_model_params=system_model_params, model_config=model_config
+            )
+            simulation_filename = base_simulation_name + f'_VQVAE_QuantizedSources_{CODEBOOK_SIZE}' + f'_QuantizedSources_Trained_{CODEBOOK_SIZE}'
+
+            # Define an evaluation parameters instance
+            simulation_parameters = (
+                TrainingParams()
+                .set_model(model=model_config)
+                .load_model(
+                    loading_path=saving_path
+                                 / "final_models"
+                                 / simulation_filename
+                )
+            )
+            model = simulation_parameters.model
+
+        # Update model params - TODO: change for correct saving
+        model.quantizer_signal.lambda_c = 1.0
+        model.set_quantize(True)
+
+
+        # print simulation summary details
+        simulation_summary(
+            system_model_params=system_model_params,
+            model_type=model_config.model_type,
+            phase="evaluation",
+            parameters=simulation_parameters,
+        )
+        # Evaluate DNN models, augmented and subspace methods
+        evaluate(
+            model=model,
+            model_type=model_config.model_type,
+            model_test_dataset=generic_test_dataset,
+            generic_test_dataset=generic_test_dataset,
+            criterion=criterion,
+            subspace_criterion=subspace_criterion,
+            system_model=samples_model,
+            figures=figures,
+            plot_spec=plot_spectrum_flag,
+        )
+
 
     plt.show()
     print("end")

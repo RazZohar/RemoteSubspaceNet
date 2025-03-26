@@ -145,6 +145,119 @@ def evaluate_dnn_model(
 
     return overall_loss
 
+def evaluate_dnn_model_online(
+    model,
+    dataset: list,
+    criterion: nn.Module,
+    plot_spec: bool = False,
+    figures: dict = None,
+    model_type: str = "SubspaceNet",
+    validation_phase = False,
+):
+    """
+    Evaluate the DNN model on a given dataset while online infrenece
+
+    Args:
+        model (nn.Module): The trained model to evaluate.
+        dataset (list): The evaluation dataset.
+        criterion (nn.Module): The loss criterion for evaluation.
+        plot_spec (bool, optional): Whether to plot the spectrum for SubspaceNet model. Defaults to False.
+        figures (dict, optional): Dictionary containing figure objects for plotting. Defaults to None.
+        model_type (str, optional): The type of the model. Defaults to "SubspaceNet".
+
+    Returns:
+        float: The overall evaluation loss.
+
+    Raises:
+        Exception: If the loss criterion is not defined for the specified model type.
+        Exception: If the model type is not defined.
+    """
+
+    # Initialize values
+    overall_loss = 0.0
+    test_length = 0
+    eval_loss = 0.0
+    # Set model to eval mode
+    model.eval()
+
+    # Init online inference parameters
+    T_prime = model.sub_horizon_time_constant
+    sample = dataset.dataset[0]
+    signals,doa = sample
+    elements, time_horizon = signals.shape
+    T = time_horizon
+
+    step_loss_history = [[] for _ in range(T//T_prime)]
+
+    # Gradients calculation isn't required for evaluation
+    with torch.no_grad():
+        for data in dataset:
+            X, DOA = data
+            test_length += DOA.shape[0]
+            # Convert observations and DoA to device
+            X = X.to(device)
+            DOA = DOA.to(device)
+
+            #Rest current eval loss and init step loss
+            eval_loss = 0.0
+            step_loss = 0.0
+
+            for t in range(0, T, T_prime):
+                if t + T_prime > T:  # Avoid index overflow
+                    continue
+
+                window_batch = X[:, :, t:t + T_prime]  # Shape [batch, N, T', 2]
+
+                model_output = model(window_batch)  # Forward pass (no time index)
+
+
+                if model_type.startswith("SignalsSubspaceNet"):
+                    DOA_predictions = model_output[0]
+                elif model_type.startswith("TaskIgnorantSubspaceNet"):
+                    # for the task igonrant validation is on the restoreation task but test will be on accuracy of DOA
+                    DOA_predictions = model_output[0]
+                else:
+                    raise Exception(
+                        f"evaluate_dnn_model_online: Model type {model_type} has no online capabilities"
+                    )
+                # Compute prediction loss
+                step_loss = criterion(DOA_predictions, DOA)
+                eval_loss += step_loss.item()
+                #print(f'Step index {t / T_prime } loss {step_loss.item()}')
+                step_loss_history[t // T_prime].append(step_loss.item())
+
+            # add the batch evaluation loss to epoch loss
+            overall_loss += (eval_loss / (T / T_prime))
+
+            #REset online history
+            model.reset_online_history()
+
+
+
+        overall_loss = overall_loss / test_length
+        step_loss_mean = [np.mean(sub_arr) for sub_arr in step_loss_history]
+        print(f'Mean of step loss {step_loss_mean}')
+
+    # Plot spectrum for SubspaceNet model
+    if plot_spec and model_type.startswith("SubspaceNet"):
+
+        if model.diff_method == 'root_music':
+            DOA_all = model_output[1]
+            roots = model_output[2]
+
+            DOA_all = model_output[1].cpu().detach().numpy()
+            roots = model_output[2].cpu().detach().numpy()
+            DOA = DOA.cpu().detach().numpy()
+            plot_spectrum(
+                predictions=DOA_all * R2D,
+                true_DOA=DOA[0] * R2D,
+                roots=roots,
+                algorithm="SubNet+R-MUSIC",
+                figures=figures,
+            )
+
+    return overall_loss
+
 
 def evaluate_augmented_model(
     model: SubspaceNet,
@@ -464,6 +577,20 @@ def evaluate(
         model_type=model_type,
     )
     print(f"{model_type} Test loss = {model_test_loss}")
+
+    if model_type == 'SignalsSubspaceNet':
+        # init model params
+        model.init_online_history(25)
+
+        model_test_loss_online = evaluate_dnn_model_online(
+            model=model,
+            dataset=model_test_dataset,
+            criterion=criterion,
+            plot_spec=plot_spec,
+            figures=figures,
+            model_type=model_type,
+        )
+        print(f"{model_type} Online Test loss = {model_test_loss_online}")
 
     if model_type != "TaskIgnorantSubspaceNet" and model_type != "SignalsSubspaceNet":
 
