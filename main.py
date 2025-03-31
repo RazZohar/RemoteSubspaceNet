@@ -109,6 +109,11 @@ def evaluate_model_command():
     )
 
 
+from itertools import cycle
+from matplotlib import rcParams
+from cycler import cycler
+
+
 if __name__ == "__main__":
     # Initialize paths
     external_data_path = Path.cwd() / "data"
@@ -142,13 +147,13 @@ if __name__ == "__main__":
 
         # Source - task based quantization
         "TRAIN_MODEL_SOURCES": False,  # Applying training operation for the sources
-        "EVALUATE_MODE_SOURCES": True,  # Evaluating desired algorithms
-        "CREATE_CODEBOOK_SOURCES": True,  # Create the codebook for VQ-VAE
-        "TRAIN_QUANTIZED_SOURCES": True,  # Train the model for the quantization
+        "EVALUATE_MODE_SOURCES": False,  # Evaluating desired algorithms
+        "CREATE_CODEBOOK_SOURCES": False,  # Create the codebook for VQ-VAE
+        "TRAIN_QUANTIZED_SOURCES": False,  # Train the model for the quantization
 
         # Online train of the model
         "TRAIN_ONLINE_SOURCES" : False,
-        "EVALUATE_ONLINE_MODE_SOURCES" : False,
+        "EVALUATE_ONLINE_MODE_SOURCES" : True,
 
         # Task ignorant quantization model
         "TRAIN_MODEL_TASK_IGNORANT": False,  # Applying training operation for the sources
@@ -156,10 +161,24 @@ if __name__ == "__main__":
         "CREATE_CODEBOOK_SOURCES_TASK_IGNORANT": False,  # Create the codebook for VQ-VAE
         "TRAIN_QUANTIZED_SOURCES_TASK_IGNORANT": False,  # Train the model for the quantization
 
-        "TRAIN_SCALAR_QUANTIZATION_SOURCES" : True, # Train the model for Scalar quantization
+        "TRAIN_SCALAR_QUANTIZATION_SOURCES" : False, # Train the model for Scalar quantization
     }
 
-    CODEBOOK_SIZE = 4
+    ## Graph tools
+    colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+    dash_styles = [
+        '-',
+        (0, (5, 5)),
+        (0, (1, 5)),
+        (0, (3, 5, 1, 5)),
+        (0, (5, 1, 1, 1))
+    ]
+    # Extend dash styles to match color length
+    dash_cycle = list(itertools.islice(itertools.cycle(dash_styles), len(colors)))
+
+    # Now same length, can combine
+    plt.rcParams['axes.prop_cycle'] = cycler(color=colors) + cycler(linestyle=dash_cycle)
+    CODEBOOK_SIZE = 128
 
     print(f'Start Executing commands')
     # Saving simulation scores to external file
@@ -172,14 +191,14 @@ if __name__ == "__main__":
     system_model_params = (
         SystemModelParams()
         .set_parameter("N", 8)
-        .set_parameter("M", 5)
+        .set_parameter("M", 3)
         .set_parameter("T", 100)
         .set_parameter("snr", 10)
         .set_parameter("signal_type", "NarrowBand")
-        .set_parameter("signal_nature", "coherent")
-        .set_parameter("eta", 0.05)
-        .set_parameter("bias", 0.05)
-        .set_parameter("sv_noise_var", 0.2)
+        .set_parameter("signal_nature", "non-coherent")
+        .set_parameter("eta", 0)
+        .set_parameter("bias", 0.0)
+        .set_parameter("sv_noise_var", 0)
         .set_parameter("codebook_size", CODEBOOK_SIZE)
     )
 
@@ -223,10 +242,15 @@ if __name__ == "__main__":
         print("Creating Data...")
         if create_training_data:
             # Generate training dataset
-            train_dataset, _, _ = create_dataset(
+            if model_config.model_type == "SignalsSubspaceNet" or model_config.model_type == "TaskIgnorantSubspaceNet":
+                model_type_name = "SubspaceNet"
+            else:
+                model_type_name = model_config.model_type
+
+            train_dataset, generic_train_dataset, samples_model = create_dataset(
                 system_model_params=system_model_params,
                 samples_size=samples_size,
-                model_type=model_config.model_type,
+                model_type=model_type_name,
                 tau=model_config.tau,
                 save_datasets=True,
                 datasets_path=datasets_path,
@@ -923,7 +947,7 @@ if __name__ == "__main__":
         )
         model = simulation_parameters.model
 
-        CODEBOOK_SIZE = 4
+        CODEBOOK_SIZE = 64
 
         quantize_creation_dataset = torch.utils.data.DataLoader(
             generic_train_dataset, batch_size=1024, shuffle=False, drop_last=False
@@ -1352,7 +1376,6 @@ if __name__ == "__main__":
         # evaluate_model_command()
 
 
-
     # Evaluation stage
     if commands["EVALUATE_MODE"]:
         # Initialize figures dict for plotting
@@ -1582,6 +1605,7 @@ if __name__ == "__main__":
             parameters=simulation_parameters,
         )
         # Evaluate DNN models, augmented and subspace methods
+
         evaluate(
             model=model,
             model_type=model_config.model_type,

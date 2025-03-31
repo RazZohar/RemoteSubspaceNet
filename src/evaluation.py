@@ -179,6 +179,7 @@ def evaluate_dnn_model_online(
     eval_loss = 0.0
     # Set model to eval mode
     model.eval()
+    model.reset_online_history()
 
     # Init online inference parameters
     T_prime = model.sub_horizon_time_constant
@@ -311,6 +312,9 @@ def evaluate_augmented_model(
     # Gradients calculation isn't required for evaluation
     with torch.no_grad():
         for i, data in enumerate(dataset):
+            # Debug only
+            if i != len(dataset.dataset) - 1:
+                continue
             X, DOA = data
             # Convert observations and DoA to device
             X = X.to(device)
@@ -319,6 +323,8 @@ def evaluate_augmented_model(
             method_output = methods[algorithm].narrowband(
                 X=X, mode="SubspaceNet", model=model
             )
+
+            #print(f'Finish augmentation {i} out of {len(dataset)}')
             # Calculate loss, if algorithm is "music" or "esprit"
             if not algorithm.startswith("mvdr"):
                 predictions, M = method_output[0], method_output[-1]
@@ -357,7 +363,177 @@ def evaluate_augmented_model(
                             algorithm="SubNet+" + algorithm.upper(),
                             figures=figures,
                         )
+
+                        np.save("Augmentation_music.npy", spectrum)
     return np.mean(hybrid_loss)
+
+
+def evaluate_augmented_model_online(
+    model,
+    dataset: list,
+    system_model,
+    criterion=RMSPE,
+    algorithm: str = "music",
+    plot_spec: bool = False,
+    figures: dict = None,
+):
+    """
+    Evaluate the DNN model on a given dataset while online infrenece
+
+    Args:
+        model (nn.Module): The trained model to evaluate.
+        dataset (list): The evaluation dataset.
+        criterion (nn.Module): The loss criterion for evaluation.
+        plot_spec (bool, optional): Whether to plot the spectrum for SubspaceNet model. Defaults to False.
+        figures (dict, optional): Dictionary containing figure objects for plotting. Defaults to None.
+        model_type (str, optional): The type of the model. Defaults to "SubspaceNet".
+
+    Returns:
+        float: The overall evaluation loss.
+
+    Raises:
+        Exception: If the loss criterion is not defined for the specified model type.
+        Exception: If the model type is not defined.
+    """
+
+    # Initialize values
+    overall_loss = 0.0
+    test_length = 0
+    eval_loss = 0.0
+    # Set model to eval mode
+    model.eval()
+
+    # Init online inference parameters
+    T_prime = model.sub_horizon_time_constant
+    sample = dataset.dataset[0]
+    signals,doa = sample
+    elements, time_horizon = signals.shape
+    T = time_horizon
+
+    step_loss_history = [[] for _ in range(T//T_prime)]
+    spectrum_history = [[] for _ in range(T//T_prime)]
+
+    # Initialize parameters for evaluation
+    hybrid_loss = []
+    if not isinstance(model, SubspaceNet):
+        raise Exception("evaluate_augmented_model: model is not from type SubspaceNet")
+    # Set model to eval mode
+    model.eval()
+    model.reset_online_history()
+
+    # Initialize instances of subspace methods
+    methods = {
+        "mvdr": MVDR(system_model),
+        "music": MUSIC(system_model),
+        "esprit": Esprit(system_model),
+        "r-music": RootMUSIC(system_model),
+    }
+    # If algorithm is not in methods
+    if methods.get(algorithm) is None:
+        raise Exception(
+            f"evaluate_augmented_model: Algorithm {algorithm} is not supported."
+        )
+    # Gradients calculation isn't required for evaluation
+    with torch.no_grad():
+        for i, data in enumerate(dataset):
+            # Debug only
+            if i != len(dataset.dataset) - 1:
+                continue
+            X, DOA = data
+            test_length += DOA.shape[0]
+            # Convert observations and DoA to device
+            X = X.to(device)
+            #DOA = DOA.to(device)
+            DOA = DOA.cpu().detach().numpy()
+
+            #Rest current eval loss and init step loss
+            eval_loss = 0.0
+            step_loss = 0.0
+
+            for t in range(0, T, T_prime):
+                if t + T_prime > T:  # Avoid index overflow
+                    continue
+
+                window_batch = X[:, :, t:t + T_prime]  # Shape [batch, N, T', 2]
+
+                model_output = model(window_batch)  # Forward pass (no time index)
+
+                #DOA_predictions = model_output[0]
+
+
+                # Apply method with SubspaceNet augmentation
+                method_output = methods[algorithm].narrowband(
+                    X=window_batch, mode="SubspaceNet", model=model
+                )
+
+                predictions, M = method_output[0], method_output[-1]
+                # If the amount of predictions is less than the amount of sources
+                predictions = add_random_predictions(M, predictions, algorithm)
+
+
+                # Calculate loss criterion
+                step_loss = criterion(predictions, DOA * R2D)
+
+                eval_loss += step_loss.item()
+                #print(f'Step index {t / T_prime } loss {step_loss.item()}')
+                step_loss_history[t // T_prime].append(step_loss.item())
+                spectrum_history[t // T_prime].append(method_output[1])
+
+            # add the batch evaluation loss to epoch loss
+            overall_loss += (eval_loss / (T / T_prime))
+
+            #REset online history
+            model.reset_online_history()
+
+        # Plot spectrum, if algorithm is "music" or "mvdr"
+        """if not algorithm.startswith("esprit"):
+            if plot_spec and i == len(dataset.dataset) - 1:
+                predictions, spectrum = method_output[0], method_output[1]
+
+                if algorithm.startswith("r-music"):
+                    DOA_all = method_output[2]
+                    roots = method_output[1]
+                    plot_spectrum(
+                        predictions=DOA_all,
+                        true_DOA=DOA[0] * R2D,
+                        roots=roots,
+                        algorithm="SubNet+R-MUSIC_aug",
+                        figures=figures,
+                    )
+                else:
+                    figures[algorithm]["norm factor"] = np.max(spectrum)
+                    plot_spectrum(
+                        predictions=predictions,
+                        true_DOA=DOA * R2D,
+                        system_model=system_model,
+                        spectrum=spectrum,
+                        algorithm="SubNet+" + algorithm.upper(),
+                        figures=figures,
+                    )
+        """
+        overall_loss = overall_loss / test_length
+        step_loss_mean = [np.mean(sub_arr) for sub_arr in step_loss_history]
+        print(f'Mean of step loss {step_loss_mean} with augmentation {algorithm}')
+
+    # Plot spectrum for SubspaceNet model
+    np.save("Spectrum_music_online.npy", [spectrum[-1] for spectrum in spectrum_history])
+    print(f'Doa is {DOA * R2D} ')
+    for idx, spectrum_step in enumerate(spectrum_history):
+        spectrum_last = spectrum_step[-1]
+        figures[algorithm]["norm factor"] = np.max(spectrum_last)
+        print(f'Plotting spectrum {idx + 1} / {len(spectrum_history)}')
+        label_name = f'RSSN+{algorithm.upper()}+p={idx+1}'
+        plot_spectrum(
+            predictions=predictions,
+            true_DOA=DOA * R2D,
+            system_model=system_model,
+            spectrum=spectrum_last,
+            algorithm=algorithm,
+            label=label_name,
+            figures=figures,
+        )
+
+    return overall_loss
 
 
 def evaluate_model_based(
@@ -548,20 +724,20 @@ def evaluate(
         None
     """
     # Set default methods for SubspaceNet augmentation
-    if not isinstance(augmented_methods, list) and model_type.startswith("SubspaceNet"):
+    if not isinstance(augmented_methods, list) and "SubspaceNet" in model_type:
         augmented_methods = [
             # "mvdr",
-            "r-music",
-            "esprit",
-            # "music",
+            #"r-music",
+            #"esprit",
+            "music",
         ]
     # Set default model-based subspace methods
     if not isinstance(subspace_methods, list):
         subspace_methods = [
-            "esprit",
-            # "music",
-            "r-music",
-            # "mvdr",
+            #"esprit",
+            #"music",
+            #"r-music",
+            #"mvdr",
             # "sps-r-music",
             # "sps-esprit",
             # "sps-music"
@@ -578,6 +754,21 @@ def evaluate(
     )
     print(f"{model_type} Test loss = {model_test_loss}")
 
+    if "SubspaceNet" in model_type:
+
+        # Evaluate SubspaceNet augmented methods
+        for algorithm in augmented_methods:
+            loss = evaluate_augmented_model(
+                model=model,
+                dataset=model_test_dataset,
+                system_model=system_model,
+                criterion=subspace_criterion,
+                algorithm=algorithm,
+                plot_spec=plot_spec,
+                figures=figures,
+            )
+            print("augmented {} test loss = {}".format(algorithm, loss * D2R))
+
     if model_type == 'SignalsSubspaceNet':
         # init model params
         model.init_online_history(25)
@@ -592,11 +783,10 @@ def evaluate(
         )
         print(f"{model_type} Online Test loss = {model_test_loss_online}")
 
-    if model_type != "TaskIgnorantSubspaceNet" and model_type != "SignalsSubspaceNet":
-
+        print(f"{model_type} Online Augmentation ")
         # Evaluate SubspaceNet augmented methods
         for algorithm in augmented_methods:
-            loss = evaluate_augmented_model(
+            loss = evaluate_augmented_model_online(
                 model=model,
                 dataset=model_test_dataset,
                 system_model=system_model,
@@ -605,7 +795,7 @@ def evaluate(
                 plot_spec=plot_spec,
                 figures=figures,
             )
-            print("augmented {} test loss = {}".format(algorithm, loss))
+            print("augmented {} test loss = {}".format(algorithm, loss * D2R))
 
     # Evaluate classical subspace methods
     for algorithm in subspace_methods:
@@ -617,4 +807,4 @@ def evaluate(
             algorithm=algorithm,
             figures=figures,
         )
-        print("{} test loss = {}".format(algorithm.lower(), loss))
+        print("{} test loss = {}".format(algorithm.lower(), loss * D2R))

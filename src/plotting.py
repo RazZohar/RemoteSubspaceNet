@@ -36,8 +36,10 @@ import torch
 from src.methods import MUSIC, RootMUSIC, MVDR
 from src.utils import R2D
 
+
+
 def plot_spectrum(predictions: np.ndarray, true_DOA: np.ndarray, system_model=None,
-    spectrum: np.ndarray =None, roots: np.ndarray =None, algorithm:str ="music",
+    spectrum: np.ndarray =None, roots: np.ndarray =None, algorithm:str ="music", label="RSSN",
     figures:dict = None):
   """
   Wrapper spectrum plotter based on the algorithm.
@@ -60,7 +62,7 @@ def plot_spectrum(predictions: np.ndarray, true_DOA: np.ndarray, system_model=No
     predictions = np.squeeze(np.array(predictions))
   # Plot MUSIC spectrums
   if "music" in algorithm.lower() and not ("r-music" in algorithm.lower()):
-    plot_music_spectrum(system_model, figures, spectrum, algorithm)
+    plot_music_spectrum(system_model, figures, spectrum, algorithm, label, true_DOA)
   elif "mvdr" in algorithm.lower():
     plot_mvdr_spectrum(system_model, figures, spectrum, true_DOA, algorithm)
   elif "r-music" in algorithm.lower():
@@ -68,7 +70,7 @@ def plot_spectrum(predictions: np.ndarray, true_DOA: np.ndarray, system_model=No
   else:
     raise Exception(f"evaluate_augmented_model: Algorithm {algorithm} is not supported.")
 
-def plot_music_spectrum(system_model, figures: dict, spectrum: np.ndarray, algorithm: str):
+def plot_music_spectrum(system_model, figures: dict, spectrum: np.ndarray, algorithm: str, label, doa):
     """
     Plot the MUSIC spectrum.
 
@@ -80,29 +82,55 @@ def plot_music_spectrum(system_model, figures: dict, spectrum: np.ndarray, algor
 
     """
     # Initialize MUSIC instance
+    from cycler import cycler
+    colors = ['b', 'g', 'r', 'c', 'm']
+    linestyles = ['-', '--', ':', '-.', (0, (5, 5))]
+
+    plt.rcParams['axes.prop_cycle'] = cycler(color=colors) + cycler(linestyle=linestyles)
+
+    #plt.rcParams.update({
+    #    "text.usetex": True,
+    #    "font.family": "serif",
+    #    "pgf.rcfonts": False,
+    #})
+    #plt.switch_backend('pgf')
+
     music = MUSIC(system_model)
     angels_grid = music._angels * R2D
     # Initialize plot for spectrum
     if figures["music"]["fig"] == None:
-      plt.style.use('default')
-      figures["music"]["fig"] = plt.figure(figsize=(8, 6))
+      #plt.style.use('default')
+      figures["music"]["fig"] = plt.figure(figsize=(6, 4.0))
       # plt.style.use('plot_style.txt')
     if figures["music"]["ax"] == None:
       figures["music"]["ax"] = figures["music"]["fig"].add_subplot(111)
     # Set labels titles and limits
-    figures["music"]["ax"].set_xlabel("Angels [deg]")
-    figures["music"]["ax"].set_ylabel("Amplitude")
-    figures["music"]["ax"].set_ylim([0.0, 1.01])
+    figures["music"]["ax"].set_xlabel("Angels [deg]", fontsize='x-small')
+    figures["music"]["ax"].set_ylabel("Normalized MUSIC spectrum", fontsize='x-small')
+    figures["music"]["ax"].set_ylim([0.0, 1.1])
     # Apply normalization factor for multiple plots
     figures["music"]["norm factor"] = None
     if figures["music"]["norm factor"] != None:
       # Plot music spectrum
-      figures["music"]["ax"].plot(angels_grid , spectrum / figures["music"]["norm factor"], label=algorithm)
+      figures["music"]["ax"].plot(angels_grid , spectrum / figures["music"]["norm factor"], label=label)
     else:
       # Plot normalized music spectrum
-      figures["music"]["ax"].plot(angels_grid , spectrum / np.max(spectrum), label=algorithm)
+      figures["music"]["ax"].plot(angels_grid + 90 , spectrum / np.max(spectrum), label=label)
+
+    #for _doa in doa:
+    #    figures["music"]["ax"].axvline(x=_doa + 90, ymin=0, ymax=1, linestyle="-", label='True DOA')
+    for _doa in doa:
+      figures["music"]["ax"].plot([_doa + 90], [1], marker='x', color="r", markersize=14)
+
+    figures["music"]["ax"].grid(True)
+
+
     # Set legend
-    figures["music"]["ax"].legend()
+    #plt.legend(loc='lower center', bbox_to_anchor=(0.5, 1.02), ncol=2)
+
+    figures["music"]["ax"].legend(loc='lower center', bbox_to_anchor=(0.5, 1.02), ncol=2, fontsize='x-small')
+    figures["music"]["fig"].tight_layout()
+    #figures["music"]["fig"].savefig("plot.pgf")
 
 def plot_mvdr_spectrum(system_model, figures: dict, spectrum: np.ndarray,
     true_DOA: np.ndarray, algorithm: str):

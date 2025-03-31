@@ -203,6 +203,7 @@ class SystemModel(object):
             # If calculation is applied through method (array mismatches are not known).
             else:
                 mis_distance, mis_geometry_noise = 0, 0
+                uniform_bias = 0
 
             return (
                 np.exp(

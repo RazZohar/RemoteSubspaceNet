@@ -817,6 +817,9 @@ class SignalsSubspaceNetEsprit(SubspaceNetEsprit):
         Rx_matrix = self.calculate_progressive_coveriance(Rx_matrix)
 
         # Apply Gram operation diagonal loading
+        #Rz = gram_diagonal_overload(
+        #    Kx=Rx_matrix, eps=1, batch_size=self.batch_size
+        #)
         Rz = add_epsilon_batch(Kx=Rx_matrix, eps=1, batch_size=self.batch_size)
 
         # Feed surrogate covariance to the differentiable subspace algorithm
@@ -1364,10 +1367,10 @@ def esprit(Rz: torch.Tensor, M: int, batch_size: int):
         doa_predictions = -1 * torch.arcsin((1 / np.pi) * eigenvalues_angels)
 
         #TODO: Check for convension
-        phase_shifts = torch.angle(phi_eigenvalues)
-        sin_theta = torch.clamp(phase_shifts / np.pi, -1.0, 1.0)
-        doa_predictions = torch.arcsin(sin_theta)
+        #phase_shifts = torch.angle(phi_eigenvalues)
+        #sin_theta = torch.clamp(phase_shifts / np.pi, -1.0, 1.0)
+        #doa_predictions = torch.arcsin(sin_theta)
 
-        doa_batches.append(-doa_predictions)
+        doa_batches.append(doa_predictions)
 
     return torch.stack(doa_batches, dim=0)

@@ -200,6 +200,7 @@ class SubspaceMethod(object):
             signal_subspace (np.ndarray): Signal subspace.
         """
         # Find eigenvalues and eigenvectors (EVD)
+        """
         eigenvalues, eigenvectors = torch.linalg.eig(covariance_mat)
         eigenvalues = eigenvalues.detach().cpu().numpy()
         eigenvectors = eigenvectors.detach().cpu().numpy()
@@ -209,7 +210,17 @@ class SubspaceMethod(object):
         signal_subspace = eigenvectors[:, 0:M]
         # Assign noise subspace as the eigenvectors associated with M lowest eigenvalues
         noise_subspace = eigenvectors[:, M:]
-        return noise_subspace, signal_subspace
+        """
+        eigenvalues, eigenvectors = torch.linalg.eig(covariance_mat)
+        # Sort eigenvalues by magnitude (descending)
+        idx = torch.argsort(torch.abs(eigenvalues), descending=True)
+
+        # Signal subspace: top-d eigenvectors
+        signal_subspace = eigenvectors[:, idx[:M]]
+
+        # Noise subspace: remaining M-d eigenvectors
+        noise_subspace = eigenvectors[:, idx[M:]]
+        return noise_subspace.detach().cpu().numpy(), signal_subspace.detach().cpu().numpy()
 
 
 class MUSIC(SubspaceMethod):
@@ -277,6 +288,7 @@ class MUSIC(SubspaceMethod):
             ]
             # Calculate the core equation element
             core_equation.append(np.conj(a).T @ Un @ np.conj(Un).T @ a)
+
         # Convert core equation to complex np.ndarray form
         core_equation = np.array(core_equation, dtype=complex)
         # MUSIC spectrum as the inverse core equation
@@ -472,7 +484,11 @@ class RootMUSIC(SubspaceMethod):
         covariance_mat = self.calculate_covariance(X=X, mode=mode, model=model)
         covariance_mat = torch.Tensor(covariance_mat).to(device)
         # Get noise subspace
-        Un, _ = self.subspace_separation(covariance_mat=covariance_mat, M=M)
+        eigenvalues, eigenvectors = torch.linalg.eig(covariance_mat)
+        Un = eigenvectors[:, torch.argsort(torch.abs(eigenvalues)).flip(0)][:, M:]
+        Un = Un.detach().cpu().numpy()
+
+        #Un, _ = self.subspace_separation(covariance_mat=covariance_mat, M=M)
         # Generate hermitian noise subspace matrix
         F = Un @ np.conj(Un).T
         # Calculates the sum of F matrix diagonals
@@ -507,8 +523,13 @@ class RootMUSIC(SubspaceMethod):
         """
         # Calculate the phase component of the roots
         roots_angels = np.angle(roots)
+
+        sin_theta = np.clip(roots_angels / np.pi, -1.0, 1.0)  # prevent domain errors
+        doa_predictions = np.arcsin(sin_theta) * R2D # in radians
+
+
         # Calculate the DoA out of the phase component
-        doa_predictions = np.arcsin((1 / np.pi) * roots_angels) * R2D
+        #doa_predictions = np.arcsin((1 / np.pi) * roots_angels) * R2D
         return doa_predictions, roots_angels
 
 
@@ -570,7 +591,24 @@ class Esprit(RootMUSIC):
         # Calculate covariance matrix
         covariance_mat = self.calculate_covariance(X=X, mode=mode, model=model)
         covariance_mat = torch.Tensor(covariance_mat).to(device)
+        eigenvalues, eigenvectors = torch.linalg.eig(covariance_mat)
         # Get noise subspace
+        Us = eigenvectors[:, torch.argsort(torch.abs(eigenvalues)).flip(0)][:, :M]
+        # Separate the signal subspace into 2 overlapping subspaces
+        Us_upper, Us_lower = (
+            Us[0: covariance_mat.shape[0] - 1],
+            Us[1: covariance_mat.shape[0]],
+        )
+        # Generate Phi matrix
+        phi = torch.linalg.pinv(Us_upper) @ Us_lower
+        # Find eigenvalues and eigenvectors (EVD) of Phi
+        phi_eigenvalues, _ = torch.linalg.eig(phi)
+        # Calculate the phase component of the roots
+        eigenvalues_angels = torch.angle(phi_eigenvalues)
+        # Calculate the DoA out of the phase component
+        doa_predictions = -1 * torch.arcsin((1 / np.pi) * eigenvalues_angels)
+
+        """
         _, Us = self.subspace_separation(covariance_mat=covariance_mat, M=M)
         # Separate the signal subspace into 2 overlapping subspaces
         Us_upper, Us_lower = (
@@ -586,14 +624,16 @@ class Esprit(RootMUSIC):
         phi_eigenvalues = phi_eigenvalues.cpu().detach().numpy()
         # Calculate DoA out of the eigenvalues of Phi
         doa_predictions = -1 * self.extract_predictions_from_roots(phi_eigenvalues)[0]
+        """
         return doa_predictions, M
 
+    """
     def extract_predictions_from_roots(self, eigenvalues):
         phase_shifts = np.angle(eigenvalues)  # in radians
         sin_theta = np.clip(phase_shifts / np.pi, -1.0, 1.0)  # prevent domain errors
         doa_rad = np.arcsin(sin_theta)  # in radians
         return doa_rad
-
+    """
 
 class MVDR(MUSIC):
     """
