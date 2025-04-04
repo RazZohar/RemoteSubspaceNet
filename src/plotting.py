@@ -109,18 +109,22 @@ def plot_music_spectrum(system_model, figures: dict, spectrum: np.ndarray, algor
     figures["music"]["ax"].set_ylabel("Normalized MUSIC spectrum", fontsize='x-small')
     figures["music"]["ax"].set_ylim([0.0, 1.1])
     # Apply normalization factor for multiple plots
+
+    half_shift = len(spectrum) // 2
+    shifted_spec = np.roll(spectrum, -half_shift)
+
     figures["music"]["norm factor"] = None
     if figures["music"]["norm factor"] != None:
       # Plot music spectrum
-      figures["music"]["ax"].plot(angels_grid , spectrum / figures["music"]["norm factor"], label=label)
+      figures["music"]["ax"].plot(angels_grid + 90, shifted_spec / figures["music"]["norm factor"], label=label)
     else:
       # Plot normalized music spectrum
-      figures["music"]["ax"].plot(angels_grid + 90 , spectrum / np.max(spectrum), label=label)
+      figures["music"]["ax"].plot(angels_grid + 90, shifted_spec / np.max(spectrum), label=label)
 
     #for _doa in doa:
     #    figures["music"]["ax"].axvline(x=_doa + 90, ymin=0, ymax=1, linestyle="-", label='True DOA')
     for _doa in doa:
-      figures["music"]["ax"].plot([_doa + 90], [1], marker='x', color="r", markersize=14)
+      figures["music"]["ax"].plot([((_doa + 180) % 180)], [1], marker='x', color="r", markersize=14)
 
     figures["music"]["ax"].grid(True)
 
